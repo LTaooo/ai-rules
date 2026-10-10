@@ -1,6 +1,6 @@
 ---
 name: gitlab-cli
-description: 当 Codex 需要操作 GitLab 项目、仓库、Issue、合并请求、流水线、发布或项目元数据时使用；统一通过 GitLab CLI `glab` 操作。
+description: 当需要操作 GitLab 项目、仓库、Issue、合并请求、流水线、发布或项目元数据时使用；统一通过 GitLab CLI `glab` 操作。
 ---
 
 # GitLab CLI
