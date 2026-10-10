@@ -1,0 +1,10 @@
+node_modules/
+dist/
+coverage/
+.test-artifacts/
+.husky/_/
+package-lock.json
+.env
+.env.*
+!.env.example
+config/databases.json

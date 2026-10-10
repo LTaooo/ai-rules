@@ -1,0 +1,38 @@
+{
+    "limits": {
+        "maxRows": 1000,
+        "timeoutMs": 10000,
+        "maxResponseBytes": 1048576,
+        "maxConcurrency": 4
+    },
+    "databases": [
+        {
+            "name": "sales",
+            "type": "postgres",
+            "description": "销售业务数据库，只读查询",
+            "host": "sales-db.internal",
+            "port": 5432,
+            "database": "sales",
+            "username": "fictional_sales_reader",
+            "password": "replace_with_real_password",
+            "sslMode": "verify-full"
+        },
+        {
+            "name": "analytics",
+            "type": "mysql",
+            "description": "数据分析数据库，只读查询",
+            "host": "analytics-db.internal",
+            "port": 3306,
+            "database": "analytics",
+            "username": "fictional_analytics_reader",
+            "password": "replace_with_real_password",
+            "tls": true
+        },
+        {
+            "name": "local",
+            "type": "sqlite",
+            "description": "本地业务测试数据库",
+            "filename": "D:/data/existing.sqlite"
+        }
+    ]
+}

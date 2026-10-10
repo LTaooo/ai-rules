@@ -1,0 +1,17 @@
+export enum LogEvent {
+    QueryRejected = 'query.rejected',
+    QueryReceived = 'query.received',
+    QueryCompleted = 'query.completed',
+    QueryFailed = 'query.failed',
+    SchemaRejected = 'schema.rejected',
+    SchemaReceived = 'schema.received',
+    SchemaCompleted = 'schema.completed',
+    SchemaFailed = 'schema.failed',
+    ServerStarting = 'server.starting',
+    ServerStopping = 'server.stopping',
+    ServerStopped = 'server.stopped',
+    ServerStarted = 'server.started',
+    ServerUncaughtException = 'server.uncaught_exception',
+    ServerUnhandledRejection = 'server.unhandled_rejection',
+    ServerStartFailed = 'server.start_failed',
+}
