@@ -1,46 +1,9 @@
-# 全局约定
+# ai-rule 项目约束
 
-## 路径约定
+本仓库维护全局规则（`RULES.md`）、同步脚本、自定义技能与工具项目。以下约束仅在本仓库内生效；跨会话、跨项目的全局约束由 `RULES.md` 承载。
 
-- `~` 表示当前运行环境的用户主目录，不是项目目录；读取文件前先解析该路径，不硬编码用户名或盘符。
-- 自定义规则与技能的 Git 仓库位于 `~/ai-rule/`；全局规则正文只维护在 `~/ai-rule/AGENTS.md`。
-- 工具不支持 `~` 展开时，先获取当前用户主目录再拼接后续路径；PowerShell 中使用 `$HOME`。
+## 内容与提交
 
-## 技能库
-
-- 自定义技能正文唯一维护在 `~/ai-rule/skills/<技能名>/`，由 `~/ai-rule/sync.ps1` 以目录联接接入工具技能目录（如 `~/.claude/skills/`）；不在任何位置保留副本，不手工改动工具技能目录中的联接。
-- 支持原生技能发现的工具会自动列出自定义技能；不具备该机制的工具和 `~/.agents/skills/` 中的第三方安装技能，执行任务前检查各技能的 frontmatter `description`，按任务匹配相关技能；不得只检查自定义技能而忽略第三方技能。没有匹配项时按常规方式处理。
-- 命中技能后，完整读取其 `SKILL.md` 并遵循其中规则；技能所需的脚本、数据和补充文档按正文指定路径加载。
-- 新建或更新个人技能时，直接维护 `~/ai-rule/skills/<技能名>/`，不再嵌套额外的目录层级，不创建库级 `SKILL.md` 或占位模板；不得未经确认覆盖已有同名技能。新建、更名或删除技能后运行同步脚本更新目录联接。
-- 同名但来源不同的技能须核对用途，存在歧义时先确认，不静默覆盖。
-- 第三方技能及 `~/.agents/.skill-lock.json` 保留在安装目录，不复制进自定义 Git 仓库，不擅自修改安装记录。
-- 技能说明使用中文，保留必要的命令和标识符；不重复 CLI 自带帮助，具体参数通过对应命令的 `--help` 查询。简单技能只保留 `SKILL.md`，不额外创建 README。
-
-## 终端
-
-- Windows 环境；终端命令默认使用 pwsh（PowerShell 7）执行，遵循 PowerShell 语法与习惯。
-- 路径使用正斜杠或双反斜杠；环境变量设置用 `$env:NAME = "value"`。
-- 脚本被执行策略拦截时，用 `Set-ExecutionPolicy -Scope Process Bypass` 临时放行。
-- pwsh 不支持 Bash heredoc；多行补丁使用 UTF-8 here-string，并直接调用 `apply_patch` 底层命令，避免管道和重定向造成编码或换行错误。
-- WSL 输出中文乱码不等于命令失败；以进程退出码和实际结果为准。
-
-## Python
-
-- 一律使用 `uv` 管理虚拟环境和依赖：`uv venv`（`-p 3.12` 指定版本）、`uv add <pkg>`、`uv add -d <pkg>`（开发依赖）、`uv remove`、`uv sync`、`uv lock --upgrade`。
-- 不要直接使用系统 pip，也不要手动激活 venv 后用裸 pip 装包。
-- 运行一律通过 `uv run <cmd>`（自动处理 PATH，无需 activate），如 `uv run python main.py`、`uv run pytest`。
-- `uv pip install` 仅用于不写入 `pyproject.toml` 的临时安装；`uv.lock` 必须提交到仓库。
-- WSL 中运行 Python 测试不得使用裸 `python3 -m pytest`；在仓库根目录用 `uv` 创建 `.venv-wsl`，并通过 `.venv-wsl/bin/python -m pytest` 执行。
-
-## Git
-
-- 未经明确要求，不执行 `git commit`。
-- 提交前自查暂存内容，任何仓库不得提交敏感信息：凭据、令牌、密钥、真实数据库配置、连接字符串、日志、备份文件和含本机用户名或主机名的路径；发现敏感信息先移除或补充忽略规则，不确定时先询问。
-- 重构前先用 `git log --oneline` 和 `git blame` 了解文件历史。
-- Bash 会话中 `HOME` 可能被设为 WSL 风格路径（如 `/mnt/c/<用户名>`），git 与 ssh 按该路径查找 `~/.gitconfig`、`~/.ssh/known_hosts` 均落空：commit 报 `Author identity unknown`，fetch/push 报 `Host key verification failed`。遇到这两类报错先用 `echo $HOME` 检查，命令加前缀 `HOME=/c/Users/<用户名>` 修复，不要因此改写 git config 或 ssh 配置。
-
-## 文档与产物
-
-- skill/文档/注释必须自包含：规则直接陈述为事实，禁止出现"参考XX""与XX一致""按XX同样规则"等出处式引用。
-- 对话中的"参考XX""像XX一样"是工作指令，决定怎么做，不进入产物内容。
-- 写完自查：脱离本次对话，未来读者能否仅凭这份文件理解每条规则？
+- 仓库只跟踪 `RULES.md`、`AGENTS.md`、`CLAUDE.md`、`README.md`、同步脚本、`skills/` 与 `tools/`；任务设计文档、`.sync-backups/`、第三方技能安装目录不纳入版本控制。
+- 凭据、令牌、真实数据库配置、连接字符串、日志和含本机用户名的路径不得写入仓库；数据源凭据只存在于 Windows 凭据管理器。
+- 提交与推送由用户明确安排。

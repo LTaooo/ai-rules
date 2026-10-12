@@ -192,10 +192,10 @@ try {
         throw '请将仓库放在当前用户主目录的 ai-rule 文件夹下，以匹配映射中的绝对路径。'
     }
 
-    $ruleSource = Join-Path $PSScriptRoot 'AGENTS.md'
+    $ruleSource = Join-Path $PSScriptRoot 'RULES.md'
     Assert-PlainPath $ruleSource $false
-    if (-not (Test-Path -LiteralPath $ruleSource -PathType Leaf)) { throw '缺少全局规则 AGENTS.md。' }
-    if ([string]::IsNullOrWhiteSpace([Text.Encoding]::UTF8.GetString([IO.File]::ReadAllBytes($ruleSource)))) { throw 'AGENTS.md 不能为空。' }
+    if (-not (Test-Path -LiteralPath $ruleSource -PathType Leaf)) { throw '缺少全局规则 RULES.md。' }
+    if ([string]::IsNullOrWhiteSpace([Text.Encoding]::UTF8.GetString([IO.File]::ReadAllBytes($ruleSource)))) { throw 'RULES.md 不能为空。' }
 
     $backupRoot = Join-Path $PSScriptRoot '.sync-backups'
     Assert-PlainPath $backupRoot $true
