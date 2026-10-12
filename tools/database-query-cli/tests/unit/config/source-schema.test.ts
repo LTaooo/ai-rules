@@ -1,4 +1,5 @@
 import { describe, expect, it } from 'vitest';
+import { resolve } from 'node:path';
 import { ErrorCode } from '../../../src/domain/enums/ErrorCode.js';
 import { SourceSchema } from '../../../src/infrastructure/config/SourceSchema.js';
 
@@ -40,9 +41,9 @@ describe('source schema', () => {
             name: 'local',
             type: 'sqlite',
             description: 'Local fixture',
-            filename: 'C:/data/local.sqlite',
+            filename: resolve('/srv/data/local.sqlite'),
         });
-        expect(local.filename).toBe('C:/data/local.sqlite');
+        expect(local.filename).toBe(resolve('/srv/data/local.sqlite'));
         expect(local.password).toBeUndefined();
         expect(local.host).toBeUndefined();
     });
@@ -82,7 +83,7 @@ describe('source schema', () => {
             name: 'local',
             type: 'sqlite',
             description: 'Local',
-            filename: 'C:/data/local.sqlite',
+            filename: resolve('/srv/data/local.sqlite'),
             password: 'x',
         },
         {

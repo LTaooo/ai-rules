@@ -1,5 +1,6 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import type { Mock } from 'vitest';
+import { resolve } from 'node:path';
 import { PassThrough } from 'node:stream';
 import { Dialect } from '../../../src/domain/enums/Dialect.js';
 import { ErrorCode } from '../../../src/domain/enums/ErrorCode.js';
@@ -114,10 +115,11 @@ describe('init wizard', () => {
 
     it('writes sqlite entries without a password', async () => {
         const { wizard, write, get } = makeWizard();
+        const filename = resolve('existing.sqlite');
         prompts.select.mockResolvedValueOnce('sqlite');
         prompts.text.mockResolvedValueOnce('local');
         prompts.text.mockResolvedValueOnce('Local fixture');
-        prompts.text.mockResolvedValueOnce('C:/data/local.sqlite');
+        prompts.text.mockResolvedValueOnce(filename);
         prompts.confirm.mockResolvedValueOnce(true);
         get.mockRejectedValueOnce(new SafeError(ErrorCode.NotFound));
         get.mockResolvedValueOnce(
@@ -125,14 +127,14 @@ describe('init wizard', () => {
                 name: 'local',
                 type: Dialect.SQLite,
                 description: 'Local fixture',
-                filename: 'C:/data/local.sqlite',
+                filename,
             }),
         );
         const status = await wizard.run();
         expect(status).toBe(0);
         const [target, payload] = write.mock.calls[0] as [string, string];
         expect(target).toBe('database-query.local');
-        expect(JSON.parse(payload).filename).toBe('C:/data/local.sqlite');
+        expect(JSON.parse(payload).filename).toBe(filename);
         expect(payload).not.toContain('password');
     });
 
