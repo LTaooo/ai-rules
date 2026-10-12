@@ -41,9 +41,9 @@ describe('source schema', () => {
             name: 'local',
             type: 'sqlite',
             description: 'Local fixture',
-            filename: resolve('/srv/data/local.sqlite'),
+            filename: resolve('.test-artifacts/fixture-local.sqlite'),
         });
-        expect(local.filename).toBe(resolve('/srv/data/local.sqlite'));
+        expect(local.filename).toBe(resolve('.test-artifacts/fixture-local.sqlite'));
         expect(local.password).toBeUndefined();
         expect(local.host).toBeUndefined();
     });
@@ -83,7 +83,7 @@ describe('source schema', () => {
             name: 'local',
             type: 'sqlite',
             description: 'Local',
-            filename: resolve('/srv/data/local.sqlite'),
+            filename: resolve('.test-artifacts/fixture-local.sqlite'),
             password: 'x',
         },
         {

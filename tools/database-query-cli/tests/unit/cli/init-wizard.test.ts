@@ -115,7 +115,7 @@ describe('init wizard', () => {
 
     it('writes sqlite entries without a password', async () => {
         const { wizard, write, get } = makeWizard();
-        const filename = resolve('existing.sqlite');
+        const filename = resolve('.test-artifacts/fixture-local.sqlite');
         prompts.select.mockResolvedValueOnce('sqlite');
         prompts.text.mockResolvedValueOnce('local');
         prompts.text.mockResolvedValueOnce('Local fixture');
