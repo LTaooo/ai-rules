@@ -1,6 +1,6 @@
 # database-query_cli
 
-TypeScript 数据库只读查询工具，同时支持多个命名的 PostgreSQL、MySQL 和 SQLite 数据源。CLI 供人工、脚本、Claude Code 和 Codex 共用；现有 MCP 入口仍保留。
+TypeScript 数据库只读查询工具，同时支持多个命名的 PostgreSQL、MySQL 和 SQLite 数据源。CLI 供人工、脚本、Claude Code 和 Codex 共用。
 
 代码当前位于 `~/ai-rule/tools/database-query-cli/`。统一 Skill 位于 `~/ai-rule/skills/database-query-cli/SKILL.md`，只维护调用流程，不复制源码或凭证。
 
@@ -26,21 +26,21 @@ SQL 默认从标准输入读取；参数化查询使用 `--sql-file`，若 SQL �
 
 - `list` 返回数据库别名、类型和公开描述；`show --database <别名>` 只返回业务标识（类型、描述、库名）与 TLS 模式，不返回主机、端口、用户名或密码——主机与用户名属于侦察信息，完整接线由用户通过 `cmdkey /list:database-query.<别名>` 查看。
 - `describe` 返回可见列信息，支持精确 `--table` 或模糊 `--table-like`（`%` 通配）；无过滤且结果被截断时返回 `RESULT_TOO_LARGE`，应改用过滤。`query` 返回 `columns`、`rows`、`rowCount`、`truncated`、`durationMs`。
-- CLI 成功结果为 stdout JSON；帮助为文本。常规失败在 stderr 输出安全错误码，退出码为 1，成功为 0。CLI 当前关闭请求日志，MCP 日志行为见下文。
+- CLI 成功结果为 stdout JSON；帮助为文本。常规失败在 stderr 输出安全错误码，退出码为 1，成功为 0。CLI 关闭请求日志。
 - 显式增加 `--diagnose` 时，MySQL 失败会额外在 stderr 输出固定执行阶段和白名单错误码；不输出驱动原始消息、连接地址、凭证、SQL 或参数。`CONNECT` 表示连接尚未建立，`UNKNOWN` 表示错误码不在公开白名单内，不能据此推断具体原因。
 - CLI 复用 `QueryService`、`SqlPolicy` 和数据库适配器，不通过 Skill 绕过只读保护。每次命令独立启动，并发限制不是跨 CLI 进程的全局限制。
 - 全部数据源配置（含密码）保存在 Windows 凭据管理器：每个数据源一条通用凭据，目标名为 `database-query.<别名>`，内容为整份 JSON 配置。没有任何配置文件；不加载 `.env` 或数据库环境变量，不接入云凭据管理，不使用 `.agentsignore`。
 - `init` 子命令运行交互式向导：询问数据源信息与密码（密码提示不回显），经 PowerShell `CredWriteW` 写入凭据管理器并读回验证。向导需要交互终端，由用户自行运行；命令不再接受任何路径参数。
 
-CLI 目前是新增实现；迁移前 SQLite/MCP 测试通过不代表迁移后的 CLI 已通过验证。使用前执行 `npm run check`，并用独立 SQLite 测试配置验证 CLI，不能用生产配置做冒烟测试。
+CLI 目前是新增实现；使用前执行 `npm run check`，并用独立 SQLite 测试配置验证 CLI，不能用生产配置做冒烟测试。
 
 ## 能力与边界
 
-- 提供 `list_databases`、`describe_schema`、`query_database` 三个 MCP 工具。
+- 子命令覆盖数据源列表、结构查询与只读业务查询，详见快速开始与 `--help`。
 - 通用 SQL 仅接受单条 SELECT、纯查询 WITH 和 UNION 等经过正向许可验证的语法。
 - 拒绝写入、删除、DDL、事务管理、多语句、注释、锁定查询、输出文件和未知函数。
 - 使用 AST 递归校验、数据库只读保护和最小权限账户；不能识别的 SQL 不降级放行。
-- 默认最多返回 1000 行、10 秒执行时间、1 MiB MCP 响应，每个数据源最多 4 个并发请求。
+- 默认最多返回 1000 行、10 秒执行时间、1 MiB 响应，每个数据源最多 4 个并发请求。
 - 数据源描述、地址、用户名和凭据目标名保存于 JSON；远程数据库密码只存 Windows 凭据管理器，JSON 不含明文密码。不加载 `.env` 或数据库环境变量，不接入云凭据管理，不使用 `.agentsignore`。
 - 运行日志使用 JSON Lines 写入 stderr，记录启动、停止、请求状态、耗时、行数、截断标识和安全错误码；不记录 SQL、参数、连接串、凭证或查询数据。
 
@@ -87,71 +87,31 @@ node dist/cli.js init
 - 描述是公开信息，不要在描述、别名中写入密码、连接串或私密地址。
 - 行数硬上限 1000（可调至 10000）、超时 10 秒（至 60000 毫秒）、响应 1 MiB（至 10 MiB）、并发每数据源 4（至 16）为内置默认，当前版本不接受外部覆盖。
 
-## 运行与 MCP 客户端
+## 查询语义
 
-从项目目录执行 `npm start`。服务的 stdout 只承载 MCP JSON-RPC 协议，没有普通日志；使用 MCP 客户端调用它，而不是在终端等待普通页面。
+### 结构查询
 
-日志示例：
-
-```text
-{"timestamp":"2026-10-09T00:00:00.000Z","level":"info","event":"query.completed","requestId":"...","database":"sales","durationMs":12,"returnedRows":3,"truncated":false}
-```
-
-日志中的数据源别名来自配置，查询内容和参数不会写入日志。错误日志只使用 `ErrorCode`，不输出数据库驱动原始异常。
-
-MCP 服务与 CLI 共用凭据管理器中的数据源，不需要任何路径参数：
-
-```json
-{
-    "mcpServers": {
-        "database-query": {
-            "command": "node",
-            "args": ["C:/Users/<用户名>/ai-rule/tools/database-query-cli/dist/index.js"]
-        }
-    }
-}
-```
-
-将路径替换为实际部署目录。服务不开放读取凭据、文件或环境变量的工具。
-
-## 工具
-
-### `list_databases`
-
-输入 `{}`，返回数据源别名、类型和公开描述，不返回连接地址、文件路径、用户名或密码。
-
-### `describe_schema`
-
-```json
-{ "database": "sales", "schema": "public", "table": "orders", "tableLike": "order%" }
-```
+`describe --database sales --schema public --table orders`，模糊过滤用 `--table-like 'order%'`。
 
 `table` 精确匹配；`tableLike` 模糊过滤——不含 `%` 时按包含匹配（`*`、`?` 自动转译为通配符），含 `%` 时按 SQL LIKE 原样使用。两者互斥；无过滤且结果被截断时返回 `RESULT_TOO_LARGE`。返回统一的列信息查询结果，列包括 `schema_name`、`table_name`、`table_type`、`column_name`、`data_type`、`nullable`、`primary_key`。可不填 table，查询可见结构；PostgreSQL 默认 public。SQLite 不接受 schema，MySQL 的 schema 只能是当前配置数据库。
 
-### `query_database`
+### 业务查询
 
-```json
-{
-    "database": "sales",
-    "sql": "SELECT id, status FROM orders WHERE id = $1 ORDER BY id",
-    "parameters": [123],
-    "maxRows": 100
-}
-```
+`query --database sales --sql-file ./query.sql --parameters-file ./parameters.json --max-rows 100`。
 
-PostgreSQL 使用 `$1`、`$2` 等占位符，MySQL 和 SQLite 使用 `?`。参数类型为字符串、有限数字、布尔值或 null。客户端 maxRows 不能超过全局限制。
+PostgreSQL 使用 `$1`、`$2` 等占位符，MySQL 和 SQLite 使用 `?`。参数类型为字符串、有限数字、布尔值或 null。`--max-rows` 不能超过全局行数上限。
 
 结果包含 `columns`、二维数组 `rows`、`rowCount`、`truncated`、`durationMs`。数组保留重复列名；大整数和精确小数以字符串返回；SQLite 整数统一为字符串。二进制输出为 `{ "type": "binary", "base64": "..." }`。PostgreSQL 驱动 Date 输出 ISO 字符串；MySQL 日期保留数据库返回的文本；不自动给无时区文本补时区。
 
 通用函数许可包含 COUNT、SUM、AVG、MIN、MAX、COALESCE、NULLIF、LOWER、UPPER、LENGTH、CHAR_LENGTH、ABS、ROUND、TRIM、LTRIM、RTRIM、SUBSTR、SUBSTRING、CONCAT；CAST 只允许内置类型。具体数据库不支持的函数会返回数据库错误，不自动改写方言。拒绝限定 schema 或以引号混淆的函数、窗口函数、用户定义函数、注释、反斜杠转义和 PostgreSQL dollar-quoted 字符串。字符串里普通的 DELETE 等关键字不会被误判。
 
-行数只省略完整行，超大字段返回错误而非截断字段。响应限额包含 MCP 中文本和结构化结果两种表示，因此实际能返回的数据量小于设置字节数。限额不能替代数据库自身内存、CPU、网络和可见数据范围控制。
+行数只省略完整行，超大字段返回错误而非截断字段。限额以规范化结果的字节数计。限额不能替代数据库自身内存、CPU、网络和可见数据范围控制。
 
 ## 只读执行
 
 - PostgreSQL：每次请求独立连接，READ ONLY 事务、服务端 statement_timeout、受限 search_path、游标读取最多上限加一行；验证事务只读且拒绝超级用户及常见高权限角色。结束回滚并关闭连接。
 - MySQL：每次请求独立连接，READ ONLY 事务、服务器 MAX_EXECUTION_TIME、预处理参数绑定、流式读取。达到上限或超时强制销毁底层 Socket，等待传输关闭后移除追踪；没有读满上限时显式回滚。断连与数据库自身执行时限共同限制后台执行。
-- SQLite：只读打开、query_only、禁止扩展加载。每次查询在不继承服务凭证环境的独立子进程执行；超时强制结束进程并等待退出，不阻塞 MCP 主线程。
+- SQLite：只读打开、query_only、禁止扩展加载。每次查询在不继承服务凭证环境的独立子进程执行；超时强制结束进程并等待退出，不阻塞调用方主线程。
 
 管理员必须提供专用最小权限账户，不能使用对象拥有者或数据库管理员账户。程序检查不能证明全部间接角色、视图和扩展安全。`docs/database-permissions.md` 描述账户设置要求。
 
@@ -188,9 +148,9 @@ check 执行格式检查、ESLint、源码和测试类型检查、编译和测�
 
 ## 测试状态与外部集成
 
-默认测试使用真实 SQLite 临时文件、真实 stdio MCP 客户端及隔离临时 Git 仓库；所有临时文件在 `.test-artifacts` 内。Git 钩子测试不创建提交。
+默认测试使用真实 SQLite 临时文件与隔离临时 Git 仓库；所有临时文件在 `.test-artifacts` 内。Git 钩子测试不创建提交。
 
-PostgreSQL、MySQL 的连接策略、超时和清理用伪驱动验证；额外使用真实 mysql2 驱动和本机假协议端点验证底层 Socket 在超时和退出时确实销毁。凭据读写用注入的伪子进程验证协议、超时与错误映射，不触碰真实凭据管理器。CLI 与 MCP 的测试组合根支持仅限测试的环境变量 `DATABASE_QUERY_TEST_SOURCES`（JSON 数组，只放合成 SQLite 数据源）；`npm test` 和 `npm run check` 在独立子进程中清除 `MCP_TEST_*` 与该变量，默认检查从不读取业务 `.env`、真实凭据或任何配置文件。结构测试使用 TypeScript AST 约束源码类组织与每个命名方法的中文 JSDoc。
+PostgreSQL、MySQL 的连接策略、超时和清理用伪驱动验证；额外使用真实 mysql2 驱动和本机假协议端点验证底层 Socket 在超时和退出时确实销毁。凭据读写用注入的伪子进程验证协议、超时与错误映射，不触碰真实凭据管理器。CLI 的测试组合根支持仅限测试的环境变量 `DATABASE_QUERY_TEST_SOURCES`（JSON 数组，只放合成 SQLite 数据源）；`npm test` 和 `npm run check` 在独立子进程中清除该变量，默认检查从不读取业务 `.env`、真实凭据或任何配置文件。结构测试使用 TypeScript AST 约束源码类组织、每个命名方法与每个枚举成员的中文 JSDoc。
 
 ## 迁移清理状态
 
@@ -201,15 +161,14 @@ JSON 与分类源码迁移已接通。旧源码备份、旧测试备份、迁移
 ## 文件结构
 
 ```text
-database-query-mcp/
+database-query-cli/
 ├── src/
-│   ├── index.ts / bootstrap/Application.ts
+│   ├── cli.ts
 │   ├── domain/enums/、models/、ports/
 │   ├── application/QueryService.ts
 │   ├── security/SqlPolicy.ts
 │   ├── infrastructure/config/、credentials/、logging/、database/
 │   │   └── database/postgres/、mysql/、sqlite/（含隔离 worker）
-│   ├── presentation/mcp/DatabaseMcpServer.ts
 │   ├── presentation/cli/DatabaseCli.ts、cli/InitWizard.ts
 │   └── shared/errors/、results/
 ├── tests/unit/、integration/

@@ -8,14 +8,14 @@ function files(folder: string): string[] {
         entry.isDirectory() ? files(join(folder, entry.name)) : [join(folder, entry.name)],
     );
 }
-it('organizes behavior in classes and documents every named method with Chinese JSDoc', () => {
+it('organizes behavior in classes and documents every named method and enum member with Chinese JSDoc', () => {
     const violations: string[] = [];
     const sourceRoot = resolve('src');
     expect(
         readdirSync(sourceRoot)
             .filter((name) => name.endsWith('.ts'))
             .sort(),
-    ).toEqual(['cli.ts', 'index.ts']);
+    ).toEqual(['cli.ts']);
     for (const filename of files(sourceRoot).filter((name) => name.endsWith('.ts'))) {
         const text = readFileSync(filename, 'utf8');
         const source = ts.createSourceFile(filename, text, ts.ScriptTarget.Latest, true);
@@ -40,6 +40,7 @@ it('organizes behavior in classes and documents every named method with Chinese 
                 ts.isGetAccessor(node) ||
                 ts.isSetAccessor(node) ||
                 ts.isMethodSignature(node) ||
+                ts.isEnumMember(node) ||
                 (ts.isPropertyDeclaration(node) &&
                     node.initializer &&
                     (ts.isArrowFunction(node.initializer) ||

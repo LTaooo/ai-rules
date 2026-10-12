@@ -11,7 +11,12 @@ export class SafeError extends Error {
 
     public diagnostic?: { stage?: DatabaseStage; reason: string };
 
-    /** 将驱动异常转换为固定白名单诊断，不保留原始消息或连接信息。 */
+    /**
+     * 将驱动异常转换为固定白名单诊断，不保留原始消息或连接信息。
+     * @param error 数据库驱动抛出的原始异常。
+     * @param stage 异常发生时所处的执行阶段。
+     * @returns 仅含白名单错误码与阶段诊断的安全错误。
+     */
     public static database(error: unknown, stage: DatabaseStage): SafeError {
         const safe = SafeError.from(error);
         const allowed = new Set([
@@ -40,14 +45,22 @@ export class SafeError extends Error {
         return safe;
     }
 
-    /** 创建仅含原因类别的凭据安全错误，不包含目标名、系统消息或密钥内容。 */
+    /**
+     * 创建仅含原因类别的凭据安全错误，不包含目标名、系统消息或密钥内容。
+     * @param reason 凭据失败的安全原因类别。
+     * @returns 携带原因诊断的凭据安全错误。
+     */
     public static credential(reason: CredentialFailure): SafeError {
         const error = new SafeError(ErrorCode.CredentialError);
         error.diagnostic = { reason };
         return error;
     }
 
-    /** 保留已脱敏错误，将未知异常转换为数据库安全错误。 */
+    /**
+     * 保留已脱敏错误，将未知异常转换为数据库安全错误。
+     * @param error 任意来源的异常。
+     * @returns 已是安全错误时原样返回，否则包装为数据库安全错误。
+     */
     public static from(error: unknown): SafeError {
         return error instanceof SafeError ? error : new SafeError(ErrorCode.DatabaseError);
     }

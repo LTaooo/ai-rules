@@ -22,7 +22,7 @@ type Options = {
     diagnose?: boolean;
 };
 
-/** 为人工与脚本提供与 MCP 相同安全边界的只读命令行入口。 */
+/** 为人工、脚本与 agent 提供只读 SQL 查询的命令行入口。 */
 export class DatabaseCli {
     /** 使用命令行参数创建 CLI，并复用 JSON 配置加载器。 */
     constructor(
@@ -31,7 +31,11 @@ export class DatabaseCli {
         private readonly stdin: NodeJS.ReadableStream = process.stdin,
     ) {}
 
-    /** 解析参数、执行命令并返回适合进程退出的状态码。 */
+    /**
+     * 解析参数、执行命令并返回适合进程退出的状态码。
+     * @param args 命令行参数，默认取 process.argv 去掉前两项。
+     * @returns 进程退出状态码：成功 0，安全失败 1。
+     */
     public async run(args: string[] = process.argv.slice(2)): Promise<number> {
         let service: QueryService | undefined;
         let diagnose = false;

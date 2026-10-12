@@ -283,7 +283,12 @@ export class SqlPolicy {
         for (const child of Object.values(node)) SqlPolicy.visit(child, dialect, depth + 1);
     }
 
-    /** 以词法检查和 AST 正向白名单验证单条只读 SELECT；未知语法、函数与写入全部拒绝。 */
+    /**
+     * 以词法检查和 AST 正向白名单验证单条只读 SELECT；未知语法、函数与写入全部拒绝。
+     * @param sql 待验证的原始 SQL 文本。
+     * @param dialect 数据源方言，决定 AST 校验规则。
+     * @returns 规范化后的 SQL 文本（去除尾部分号）。
+     */
     public static validateSql(sql: string, dialect: Dialect): string {
         try {
             const clean = SqlPolicy.checkLexical(sql);

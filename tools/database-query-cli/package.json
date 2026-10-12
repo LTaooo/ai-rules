@@ -1,5 +1,5 @@
 {
-    "name": "database-query-mcp",
+    "name": "database-query-cli",
     "version": "0.1.0",
     "private": true,
     "type": "module",
@@ -7,9 +7,7 @@
         "node": ">=24.4.0 <25"
     },
     "scripts": {
-        "start": "node dist/index.js",
         "cli": "node dist/cli.js",
-        "dev": "npm run build && npm start",
         "build": "tsc -p tsconfig.json",
         "typecheck": "tsc -p tsconfig.json --noEmit && tsc -p tsconfig.test.json",
         "test": "npm run build && node scripts/run-tests.mjs",
@@ -28,7 +26,6 @@
     },
     "dependencies": {
         "@clack/prompts": "1.8.1",
-        "@modelcontextprotocol/sdk": "1.32.1",
         "mysql2": "3.24.5",
         "node-sql-parser": "5.4.0",
         "pg": "8.23.1",

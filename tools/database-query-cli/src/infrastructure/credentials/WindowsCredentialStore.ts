@@ -146,7 +146,11 @@ export class WindowsCredentialStore implements SourceRegistry, SourceWriter {
         private readonly maxOutputBytes: number = 65536,
     ) {}
 
-    /** 按别名读取并校验数据源配置；别名不存在时抛出 NotFound。 */
+    /**
+     * 按别名读取并校验数据源配置；别名不存在时抛出 NotFound。
+     * @param name 数据源别名。
+     * @returns 含密码的完整数据源领域配置。
+     */
     public async get(name: string): Promise<DatabaseConfig> {
         if (!SourceSchema.namePattern.test(name)) throw new SafeError(ErrorCode.NotFound);
         let payload: string;
@@ -159,7 +163,10 @@ export class WindowsCredentialStore implements SourceRegistry, SourceWriter {
         return SourceSchema.parse(Buffer.from(payload, 'base64').toString('utf8'));
     }
 
-    /** 枚举前缀下的全部数据源凭据，解析失败的无关条目被跳过。 */
+    /**
+     * 枚举前缀下的全部数据源凭据，解析失败的无关条目被跳过。
+     * @returns 校验通过的数据源领域配置列表。
+     */
     public async list(): Promise<DatabaseConfig[]> {
         const payload = await this.request('list', SOURCE_TARGET_PREFIX + '*');
         let items: { target?: unknown; payload?: unknown }[] = [];
@@ -185,7 +192,11 @@ export class WindowsCredentialStore implements SourceRegistry, SourceWriter {
         return sources;
     }
 
-    /** 将数据源完整配置 JSON 写入凭据管理器目标，blob 为 UTF-8 字节。 */
+    /**
+     * 将数据源完整配置 JSON 写入凭据管理器目标，blob 为 UTF-8 字节。
+     * @param target 数据源凭据目标名，必须使用仓库前缀。
+     * @param payload 数据源完整配置的 JSON 文本。
+     */
     public async write(target: string, payload: string): Promise<void> {
         if (
             !target.startsWith(SOURCE_TARGET_PREFIX) ||

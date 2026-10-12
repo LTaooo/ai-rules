@@ -1,6 +1,6 @@
 # 数据库最小权限部署
 
-所有账户、权限和业务视图由数据库管理员在可信部署环境设置。MCP 工具不执行下面的账户管理语句，也不自动创建账户。示例密码都是虚构值，不在 agent 会话或日志中使用真实密码执行这些示例。
+所有账户、权限和业务视图由数据库管理员在可信部署环境设置。工具不执行下面的账户管理语句，也不自动创建账户。示例密码都是虚构值，不在 agent 会话或日志中使用真实密码执行这些示例。
 
 ## PostgreSQL
 
@@ -9,11 +9,11 @@
 示例假设数据库为 sales，管理员已建立 public.order_query_view：
 
 ```sql
-CREATE ROLE mcp_reader LOGIN PASSWORD 'replace_me' NOSUPERUSER NOCREATEDB NOCREATEROLE NOREPLICATION;
-GRANT CONNECT ON DATABASE sales TO mcp_reader;
-GRANT USAGE ON SCHEMA public TO mcp_reader;
-GRANT SELECT ON public.order_query_view TO mcp_reader;
-ALTER ROLE mcp_reader SET default_transaction_read_only = on;
+CREATE ROLE query_reader LOGIN PASSWORD 'replace_me' NOSUPERUSER NOCREATEDB NOCREATEROLE NOREPLICATION;
+GRANT CONNECT ON DATABASE sales TO query_reader;
+GRANT USAGE ON SCHEMA public TO query_reader;
+GRANT SELECT ON public.order_query_view TO query_reader;
+ALTER ROLE query_reader SET default_transaction_read_only = on;
 ```
 
 服务额外使用 READ ONLY 事务和 statement_timeout，不依赖账户默认设置。程序验证当前角色常见高权限标志，不会穷举所有继承权限和对象定义；管理员仍需审查角色成员、对象拥有者、函数、扩展及视图暴露范围。
@@ -27,8 +27,8 @@ ALTER ROLE mcp_reader SET default_transaction_read_only = on;
 假设数据库为 sales，已建立 order_query_view：
 
 ```sql
-CREATE USER 'mcp_reader'@'trusted-service-host' IDENTIFIED BY 'replace_me';
-GRANT SELECT ON sales.order_query_view TO 'mcp_reader'@'trusted-service-host';
+CREATE USER 'query_reader'@'trusted-service-host' IDENTIFIED BY 'replace_me';
+GRANT SELECT ON sales.order_query_view TO 'query_reader'@'trusted-service-host';
 ```
 
 将 trusted-service-host 替换为受控服务来源，不默认允许任意来源。不能授予 FILE、EXECUTE、CREATE TEMPORARY TABLES、写入、DDL、管理权限或高权限角色。仅允许查询批准对象；不能授予保存业务密钥的表。
@@ -47,7 +47,7 @@ SQLite 查询子进程继承同一操作系统账户，只隔离查询的阻塞�
 
 - 每个数据源的完整配置（含密码）作为一条通用凭据保存在 Windows 凭据管理器，目标名 `database-query.<别名>`；不存在配置文件。凭据读写由 PowerShell `CredReadW`/`CredWriteW` 完成，内容不进入日志、错误信息或查询数据。
 - PostgreSQL 远程连接使用验证服务器证书的 TLS 配置；MySQL 使用凭据条目中的 `tls: true` 并配置信任链。不要为了连接成功关闭证书验证。
-- MCP 服务、数据库对象和扩展由可信管理员控制。SQL 检查不保证恶意服务器代码没有外部副作用。
+- 查询服务、数据库对象和扩展由可信管理员控制。SQL 检查不保证恶意服务器代码没有外部副作用。
 - 只读账户不自动隐藏密码列；通过授予限定视图或限定数据文件限制 agent 可见内容。
 - 定期轮换密码：用 `cmdkey /delete:database-query.<目标名>` 删除旧凭据，重新运行 `init` 写入新密码。已经泄露的凭证必须撤销或轮换，不能只删除文件。
 - `.gitignore` 不会自动清除已被 Git 跟踪的文件或历史中的秘密。

@@ -33,7 +33,7 @@ export class PostgresAdapter implements DatabaseAdapter {
             connectionTimeoutMillis: limits.timeoutMs,
             statement_timeout: limits.timeoutMs,
             query_timeout: limits.timeoutMs,
-            application_name: 'database-query-mcp',
+            application_name: 'database-query-cli',
         });
         client.on('error', () => {});
         this.clients.add(client);

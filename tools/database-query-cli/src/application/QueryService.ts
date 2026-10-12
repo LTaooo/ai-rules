@@ -75,7 +75,10 @@ export class QueryService {
         return adapter;
     }
 
-    /** 返回数据源的公开投影，不返回用户名、密码或地址。 */
+    /**
+     * 返回数据源的公开投影，不返回用户名、密码或地址。
+     * @returns 数据源别名、类型与描述组成的列表。
+     */
     async listDatabases(): Promise<{ name: string; type: string; description?: string }[]> {
         return (await this.registry.list()).map((database) => database.publicInfo);
     }
@@ -110,7 +113,11 @@ export class QueryService {
         }
     }
 
-    /** 执行参数绑定的只读查询；限制时间、行数与字节，结束后释放资源。 */
+    /**
+     * 执行参数绑定的只读查询；限制时间、行数与字节，结束后释放资源。
+     * @param input 包含 database、sql、可选 parameters 与 maxRows 的原始输入。
+     * @returns 列名、二维行、行数、截断标识与耗时组成的查询结果。
+     */
     async query(input: unknown): Promise<QueryResult> {
         const requestId = crypto.randomUUID();
         const parsed = queryInput.safeParse(input);
@@ -150,7 +157,11 @@ export class QueryService {
         }
     }
 
-    /** 返回数据源的业务标识与 TLS 配置，不包含主机、端口、用户名等侦察信息。 */
+    /**
+     * 返回数据源的业务标识与 TLS 配置，不包含主机、端口、用户名等侦察信息。
+     * @param name 数据源别名。
+     * @returns 除密码与连接地址外的数据源标识字段。
+     */
     async showSource(name: string): Promise<Record<string, unknown>> {
         const source = await this.source(name);
         return {
@@ -170,7 +181,11 @@ export class QueryService {
         return translated.includes('%') ? translated : `%${translated}%`;
     }
 
-    /** 使用绑定参数查询可见表结构；无精确表名时截断视为范围过宽，拒绝返回不完整结构。 */
+    /**
+     * 使用绑定参数查询可见表结构；无精确表名时截断视为范围过宽，拒绝返回不完整结构。
+     * @param input 包含 database、可选 schema、table 与 tableLike 的原始输入。
+     * @returns 表与列的结构化信息，含截断标识与耗时。
+     */
     async describe(input: unknown): Promise<QueryResult> {
         const requestId = crypto.randomUUID();
         const parsed = describeInput.safeParse(input);
@@ -212,11 +227,6 @@ export class QueryService {
             });
             throw safe;
         }
-    }
-
-    /** 返回完整 MCP 响应可使用的字节上限。 */
-    get maxResponseBytes(): number {
-        return this.limits.maxResponseBytes;
     }
 
     /** 关闭跟踪中的连接或隔离进程，重复调用不会恢复已关闭服务。 */

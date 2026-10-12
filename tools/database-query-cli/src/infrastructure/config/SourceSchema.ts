@@ -16,7 +16,11 @@ export class SourceSchema {
     });
     /** 数据源公开别名的允许字符集。 */
     public static readonly namePattern = /^[A-Za-z0-9_][A-Za-z0-9_-]{0,127}$/;
-    /** 校验单条数据源对象并构造领域配置；密码字段仅存在于凭据 blob 的 JSON 中。 */
+    /**
+     * 校验单条数据源对象并构造领域配置；密码字段仅存在于凭据 blob 的 JSON 中。
+     * @param value 待校验的原始数据源对象。
+     * @returns 不可变的数据源领域配置。
+     */
     public static validateDatabase(value: unknown): DatabaseConfig {
         const raw = SourceSchema.object(value);
         const name = SourceSchema.string(raw.name);
@@ -60,7 +64,11 @@ export class SourceSchema {
             throw new SafeError(ErrorCode.ConfigError);
         return new DatabaseConfig({ ...config, tls: raw.tls === true });
     }
-    /** 解析凭据 blob 中的 JSON 文本并校验为领域配置，解析失败转换为安全错误。 */
+    /**
+     * 解析凭据 blob 中的 JSON 文本并校验为领域配置，解析失败转换为安全错误。
+     * @param payload 凭据 blob 的 UTF-8 JSON 文本。
+     * @returns 不可变的数据源领域配置。
+     */
     public static parse(payload: string): DatabaseConfig {
         let parsed: unknown;
         try {

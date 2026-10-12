@@ -43,7 +43,7 @@ describe('stderr logger', () => {
         const logger = new Logger((line) => lines.push(line));
 
         logger.warn(LogEvent.QueryFailed, { code: 'SQL_REJECTED' });
-        logger.error(LogEvent.ServerStartFailed, { code: 'CONFIG_ERROR' });
+        logger.error(LogEvent.QueryFailed, { code: 'DATABASE_ERROR' });
 
         expect(lines.map((line) => (JSON.parse(line) as { level: string }).level)).toEqual([
             'warn',
