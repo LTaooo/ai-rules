@@ -153,17 +153,24 @@ export class MysqlAdapter implements DatabaseAdapter {
         }
     }
 
-    /** 使用绑定参数查询可见表结构，拒绝越界 schema，不拼接用户标识符。 */
+    /** 使用绑定参数查询可见表结构；table 精确匹配，tableLike 模糊过滤，拒绝越界 schema。 */
     async describe(
         schema: string | undefined,
         table: string | undefined,
+        tableLike: string | undefined,
         limits: Limits,
     ): Promise<RawResult> {
         if (schema !== undefined && schema !== this.config.database)
             throw new SafeError(ErrorCode.InvalidRequest);
         return this.query(
-            "SELECT c.TABLE_SCHEMA AS schema_name, c.TABLE_NAME AS table_name, t.TABLE_TYPE AS table_type, c.COLUMN_NAME AS column_name, c.COLUMN_TYPE AS data_type, c.IS_NULLABLE = 'YES' AS nullable, c.COLUMN_KEY = 'PRI' AS primary_key FROM information_schema.COLUMNS c JOIN information_schema.TABLES t ON t.TABLE_SCHEMA = c.TABLE_SCHEMA AND t.TABLE_NAME = c.TABLE_NAME WHERE c.TABLE_SCHEMA = ? AND (? IS NULL OR c.TABLE_NAME = ?) ORDER BY c.TABLE_NAME, c.ORDINAL_POSITION",
-            [this.config.database!, table ?? null, table ?? null],
+            "SELECT c.TABLE_SCHEMA AS schema_name, c.TABLE_NAME AS table_name, t.TABLE_TYPE AS table_type, c.COLUMN_NAME AS column_name, c.COLUMN_TYPE AS data_type, c.IS_NULLABLE = 'YES' AS nullable, c.COLUMN_KEY = 'PRI' AS primary_key FROM information_schema.COLUMNS c JOIN information_schema.TABLES t ON t.TABLE_SCHEMA = c.TABLE_SCHEMA AND t.TABLE_NAME = c.TABLE_NAME WHERE c.TABLE_SCHEMA = ? AND (? IS NULL OR c.TABLE_NAME = ?) AND (? IS NULL OR c.TABLE_NAME LIKE ?) ORDER BY c.TABLE_NAME, c.ORDINAL_POSITION",
+            [
+                this.config.database!,
+                table ?? null,
+                table ?? null,
+                tableLike ?? null,
+                tableLike ?? null,
+            ],
             limits,
         );
     }

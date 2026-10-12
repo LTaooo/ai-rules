@@ -26,7 +26,7 @@ export class DatabaseConfig {
     public readonly filename: string | undefined;
     public readonly sslMode: SslMode | undefined;
     public readonly tls: boolean | undefined;
-    /** 保存经配置加载器验证的字段，不解析 URL，不读取环境凭证。 */
+    /** 保存经验证的字段；password 来自凭据管理器 blob，不来自文件或环境变量。 */
     constructor(options: DatabaseConfigOptions) {
         this.name = options.name;
         this.type = options.type;
@@ -39,6 +39,22 @@ export class DatabaseConfig {
         this.filename = options.filename;
         this.sslMode = options.sslMode;
         this.tls = options.tls;
+    }
+    /** 返回填充运行时密码的新配置，原配置保持不可变。 */
+    public withPassword(password: string): DatabaseConfig {
+        return new DatabaseConfig({
+            name: this.name,
+            type: this.type,
+            description: this.description,
+            host: this.host,
+            port: this.port,
+            database: this.database,
+            username: this.username,
+            filename: this.filename,
+            sslMode: this.sslMode,
+            tls: this.tls,
+            password,
+        });
     }
     /** 仅投影公开名称、类型和描述，不暴露地址、路径与凭证。 */
     public get publicInfo(): { name: string; type: Dialect; description?: string } {

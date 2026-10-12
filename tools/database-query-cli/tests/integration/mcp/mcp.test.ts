@@ -1,5 +1,5 @@
 import { DatabaseSync } from 'node:sqlite';
-import { mkdtempSync, mkdirSync, rmSync, writeFileSync } from 'node:fs';
+import { mkdtempSync, mkdirSync, rmSync } from 'node:fs';
 import { resolve } from 'node:path';
 import { Client } from '@modelcontextprotocol/sdk/client/index.js';
 import { StdioClientTransport } from '@modelcontextprotocol/sdk/client/stdio.js';
@@ -12,21 +12,15 @@ it('serves three real stdio MCP tools without stdout log contamination', async (
     const database = new DatabaseSync(filename);
     database.exec('CREATE TABLE users (id INTEGER PRIMARY KEY); INSERT INTO users VALUES (1)');
     database.close();
-    const configPath = resolve(folder, 'databases.json');
-    writeFileSync(
-        configPath,
-        JSON.stringify({
-            databases: [
-                { name: 'test', type: 'sqlite', description: 'Isolated fixture', filename },
-            ],
-        }),
-    );
+    const sources = JSON.stringify([
+        { name: 'test', type: 'sqlite', description: 'Isolated fixture', filename },
+    ]);
     const client = new Client({ name: 'integration-test', version: '1.0.0' });
     const transport = new StdioClientTransport({
         command: process.execPath,
-        args: [resolve('dist/index.js'), '--config', configPath],
+        args: [resolve('dist/index.js')],
         cwd: folder,
-        env: {},
+        env: { DATABASE_QUERY_TEST_SOURCES: sources },
         stderr: 'pipe',
     });
     try {

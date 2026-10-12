@@ -55,7 +55,7 @@ export class DatabaseMcpServer {
                 }),
                 annotations,
             },
-            () => respond(async () => ({ databases: service.listDatabases() })),
+            () => respond(async () => ({ databases: await service.listDatabases() })),
         );
         server.registerTool(
             ToolName.DescribeSchema,

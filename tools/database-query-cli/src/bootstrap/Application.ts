@@ -1,6 +1,7 @@
 import { StdioServerTransport } from '@modelcontextprotocol/sdk/server/stdio.js';
 import type { McpServer } from '@modelcontextprotocol/sdk/server/mcp.js';
-import { ConfigLoader } from '../infrastructure/config/ConfigLoader.js';
+import { WindowsCredentialStore } from '../infrastructure/credentials/WindowsCredentialStore.js';
+import { StaticSourceRegistry } from '../infrastructure/credentials/StaticSourceRegistry.js';
 import { Logger } from '../infrastructure/logging/Logger.js';
 import { SafeError } from '../shared/errors/SafeError.js';
 import { DatabaseMcpServer } from '../presentation/mcp/DatabaseMcpServer.js';
@@ -14,16 +15,15 @@ export class Application {
     private stopping: Promise<void> | undefined;
     /** 注入只写 stderr 的日志器，启动前不建立任何数据库连接。 */
     constructor(private readonly logger: Logger = new Logger()) {}
-    /** 加载显式 JSON 配置、连接 stdio 并安装进程生命周期处理。 */
+    /** 枚举凭据管理器中的数据源、连接 stdio 并安装进程生命周期处理。 */
     public async run(): Promise<void> {
-        const config = ConfigLoader.fromArguments().load();
+        const registry = StaticSourceRegistry.tryFromEnvironment() ?? new WindowsCredentialStore();
+        const databases = await registry.list();
         this.logger.info(LogEvent.ServerStarting, {
-            databaseCount: config.databases.length,
-            databaseTypes: [...new Set(config.databases.map((database) => database.type))].join(
-                ',',
-            ),
+            databaseCount: databases.length,
+            databaseTypes: [...new Set(databases.map((database) => database.type))].join(','),
         });
-        this.service = new QueryService(config, undefined, this.logger);
+        this.service = new QueryService(registry, undefined, undefined, this.logger);
         this.server = DatabaseMcpServer.create(this.service);
         process.once('SIGINT', this.stop);
         process.once('SIGTERM', this.stop);

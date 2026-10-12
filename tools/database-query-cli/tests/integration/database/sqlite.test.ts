@@ -2,11 +2,11 @@ import { DatabaseConfig } from '../../../src/domain/models/DatabaseConfig.js';
 import { DatabaseSync } from 'node:sqlite';
 import { mkdirSync, mkdtempSync, existsSync, rmSync } from 'node:fs';
 import { resolve } from 'node:path';
-import { pathToFileURL } from 'node:url';
 import { afterEach, describe, expect, it } from 'vitest';
-import { fixtureConfig as loadConfig } from '../../helpers/FixtureConfig.js';
 import { QueryService } from '../../../src/application/QueryService.js';
 import { SqliteAdapter } from '../../../src/infrastructure/database/sqlite/SqliteAdapter.js';
+import { SourceSchema } from '../../../src/infrastructure/config/SourceSchema.js';
+import { StaticSourceRegistry } from '../../../src/infrastructure/credentials/StaticSourceRegistry.js';
 
 mkdirSync('.test-artifacts', { recursive: true });
 const folders: string[] = [];
@@ -25,11 +25,16 @@ function fixture() {
         "CREATE TABLE users (id INTEGER PRIMARY KEY, name TEXT NOT NULL); INSERT INTO users VALUES (1, 'Ada'), (2, 'Lin'), (3, 'Pat');",
     );
     database.close();
-    const url = pathToFileURL(filename).href.replace('file:', 'sqlite:');
-    const config = loadConfig({ DB_LOCAL_URL: url, MCP_DB_MAX_ROWS: '2' });
-    const service = new QueryService(config);
+    const source = SourceSchema.validateDatabase({
+        name: 'local',
+        type: 'sqlite',
+        description: 'Synthetic fixture',
+        filename,
+    });
+    const limits = { ...SourceSchema.defaultLimits, maxRows: 2 };
+    const service = new QueryService(new StaticSourceRegistry([source]), limits);
     services.push(service);
-    return { filename, config, service };
+    return { filename, source, limits, service };
 }
 
 describe('real SQLite read-only adapter', () => {
@@ -71,7 +76,7 @@ describe('real SQLite read-only adapter', () => {
     });
 
     it('blocks writes at the database layer even without the SQL guard', async () => {
-        const { config, filename } = fixture();
+        const { source, limits, filename } = fixture();
         const rawConnection = new DatabaseSync(filename, { readOnly: true });
         try {
             expect(() => rawConnection.exec('DELETE FROM users')).toThrow();
@@ -79,34 +84,30 @@ describe('real SQLite read-only adapter', () => {
         } finally {
             rawConnection.close();
         }
-        const adapter = new SqliteAdapter(config.databases[0]!);
-        await expect(adapter.query('DELETE FROM users', [], config.limits)).rejects.toThrow();
-        await expect(
-            adapter.query('CREATE TABLE evil (id INT)', [], config.limits),
-        ).rejects.toThrow();
+        const adapter = new SqliteAdapter(source);
+        await expect(adapter.query('DELETE FROM users', [], limits)).rejects.toThrow();
+        await expect(adapter.query('CREATE TABLE evil (id INT)', [], limits)).rejects.toThrow();
         await adapter.close();
     });
 
     it('never creates absent database files', async () => {
-        const { config, filename } = fixture();
+        const { source, limits, filename } = fixture();
         const missing = `${filename}.missing`;
-        const adapter = new SqliteAdapter(
-            new DatabaseConfig({ ...config.databases[0]!, filename: missing }),
-        );
-        await expect(adapter.query('SELECT 1', [], config.limits)).rejects.toThrow();
+        const adapter = new SqliteAdapter(new DatabaseConfig({ ...source, filename: missing }));
+        await expect(adapter.query('SELECT 1', [], limits)).rejects.toThrow();
         expect(existsSync(missing)).toBe(false);
         await adapter.close();
     });
 
     it('terminates expensive work and remains usable', async () => {
-        const { config } = fixture();
-        const adapter = new SqliteAdapter(config.databases[0]!);
+        const { source, limits } = fixture();
+        const adapter = new SqliteAdapter(source);
         const expensive =
             'WITH RECURSIVE sequence(value) AS (SELECT 1 UNION ALL SELECT value + 1 FROM sequence WHERE value < 100000000) SELECT SUM(value) FROM sequence';
-        await expect(
-            adapter.query(expensive, [], { ...config.limits, timeoutMs: 200 }),
-        ).rejects.toThrow('TIMEOUT');
-        const result = await adapter.query('SELECT 1', [], config.limits);
+        await expect(adapter.query(expensive, [], { ...limits, timeoutMs: 200 })).rejects.toThrow(
+            'TIMEOUT',
+        );
+        const result = await adapter.query('SELECT 1', [], limits);
         expect(result.rows).toEqual([[1n]]);
         await adapter.close();
     });

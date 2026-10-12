@@ -1,20 +1,23 @@
 import { readFile } from 'node:fs/promises';
-import { ConfigLoader } from '../../infrastructure/config/ConfigLoader.js';
 import { QueryService } from '../../application/QueryService.js';
+import { InitWizard } from './InitWizard.js';
+import { WindowsCredentialStore } from '../../infrastructure/credentials/WindowsCredentialStore.js';
+import { StaticSourceRegistry } from '../../infrastructure/credentials/StaticSourceRegistry.js';
 import { Logger } from '../../infrastructure/logging/Logger.js';
 import { ErrorCode } from '../../domain/enums/ErrorCode.js';
 import { SafeError } from '../../shared/errors/SafeError.js';
 import type { Parameter } from '../../domain/models/QueryResult.js';
 
-type Command = 'list' | 'describe' | 'query' | 'help';
+type Command = 'list' | 'describe' | 'query' | 'show' | 'init' | 'help';
 type Options = {
     command: Command;
-    config?: string;
     database?: string;
     schema?: string;
     table?: string;
+    tableLike?: string;
     sqlFile?: string;
     parametersFile?: string;
+    parameters?: string;
     maxRows?: number;
     diagnose?: boolean;
 };
@@ -39,8 +42,12 @@ export class DatabaseCli {
                 this.write(this.help());
                 return 0;
             }
-            const config = new ConfigLoader(options.config).load();
-            service = new QueryService(config, undefined, new Logger(() => undefined));
+            if (options.command === 'init') {
+                return await new InitWizard(this.stdin, this.stdout).run();
+            }
+            const registry =
+                StaticSourceRegistry.tryFromEnvironment() ?? new WindowsCredentialStore();
+            service = new QueryService(registry, undefined, undefined, new Logger(() => undefined));
             const result = await this.execute(options, service);
             await service.close();
             service = undefined;
@@ -66,7 +73,13 @@ export class DatabaseCli {
         if (args.length === 0 || args[0] === '--help' || args[0] === '-h')
             return { command: 'help' };
         const command = args[0];
-        if (command !== 'list' && command !== 'describe' && command !== 'query')
+        if (
+            command !== 'list' &&
+            command !== 'describe' &&
+            command !== 'query' &&
+            command !== 'show' &&
+            command !== 'init'
+        )
             throw new SafeError(ErrorCode.InvalidRequest);
         const options: Options = { command };
         const seen = new Set<string>();
@@ -81,10 +94,11 @@ export class DatabaseCli {
             }
             const value = args[++index];
             if (!value || value.startsWith('--')) throw new SafeError(ErrorCode.InvalidRequest);
-            if (flag === '--config') options.config = value;
-            else if (flag === '--database') options.database = value;
+            if (flag === '--database') options.database = value;
             else if (flag === '--schema') options.schema = value;
             else if (flag === '--table') options.table = value;
+            else if (flag === '--table-like') options.tableLike = value;
+            else if (flag === '--parameters') options.parameters = value;
             else if (flag === '--sql-file') options.sqlFile = value;
             else if (flag === '--parameters-file') options.parametersFile = value;
             else if (flag === '--max-rows') options.maxRows = this.positiveInteger(value);
@@ -96,13 +110,43 @@ export class DatabaseCli {
 
     /** 校验每个子命令所需参数，防止把不相关字段传入应用层。 */
     private validateOptions(options: Options): void {
+        if (options.command === 'init') {
+            if (
+                options.database ||
+                options.schema ||
+                options.table ||
+                options.tableLike ||
+                options.sqlFile ||
+                options.parametersFile ||
+                options.parameters !== undefined ||
+                options.maxRows !== undefined
+            )
+                throw new SafeError(ErrorCode.InvalidRequest);
+            return;
+        }
+        if (options.command === 'show') {
+            if (!options.database) throw new SafeError(ErrorCode.InvalidRequest);
+            if (
+                options.schema ||
+                options.table ||
+                options.tableLike ||
+                options.sqlFile ||
+                options.parametersFile ||
+                options.parameters !== undefined ||
+                options.maxRows !== undefined
+            )
+                throw new SafeError(ErrorCode.InvalidRequest);
+            return;
+        }
         if (options.command === 'list') {
             if (
                 options.database ||
                 options.schema ||
                 options.table ||
+                options.tableLike ||
                 options.sqlFile ||
                 options.parametersFile ||
+                options.parameters !== undefined ||
                 options.maxRows !== undefined
             )
                 throw new SafeError(ErrorCode.InvalidRequest);
@@ -110,25 +154,37 @@ export class DatabaseCli {
         }
         if (!options.database) throw new SafeError(ErrorCode.InvalidRequest);
         if (options.command === 'describe') {
-            if (options.sqlFile || options.parametersFile || options.maxRows !== undefined)
+            if (
+                options.sqlFile ||
+                options.parametersFile ||
+                options.parameters !== undefined ||
+                options.maxRows !== undefined
+            )
                 throw new SafeError(ErrorCode.InvalidRequest);
             return;
         }
-        if (options.schema || options.table || (!options.sqlFile && options.parametersFile))
+        if (
+            options.schema ||
+            options.table ||
+            options.tableLike ||
+            (!options.sqlFile && options.parametersFile)
+        )
             throw new SafeError(ErrorCode.InvalidRequest);
     }
 
-    /** 执行公开列表、结构描述或参数绑定查询。 */
+    /** 执行公开列表、元数据查看、结构描述或参数绑定查询。 */
     private async execute(options: Options, service: QueryService): Promise<unknown> {
         if (options.command === 'list') return service.listDatabases();
+        if (options.command === 'show') return service.showSource(options.database!);
         if (options.command === 'describe')
             return service.describe({
                 database: options.database,
                 schema: options.schema,
                 table: options.table,
+                tableLike: options.tableLike,
             });
         const sql = await this.readSql(options.sqlFile);
-        const parameters = await this.readParameters(options.parametersFile);
+        const parameters = await this.readParameters(options);
         return service.query({
             database: options.database,
             sql,
@@ -145,15 +201,31 @@ export class DatabaseCli {
         return content;
     }
 
-    /** 读取 JSON 参数数组并交给 QueryService 做最终类型和数量校验。 */
-    private async readParameters(filename: string | undefined): Promise<Parameter[]> {
-        if (!filename) return [];
-        let parsed: unknown;
-        try {
-            parsed = JSON.parse(await this.readInput(filename));
-        } catch {
-            throw new SafeError(ErrorCode.InvalidRequest);
+    /** 读取 JSON 参数数组并交给 QueryService 做最终类型和数量校验；支持文件与内联两种来源。 */
+    private async readParameters(options: Options): Promise<Parameter[]> {
+        if (options.parametersFile !== undefined) {
+            let parsed: unknown;
+            try {
+                parsed = JSON.parse(await this.readInput(options.parametersFile));
+            } catch {
+                throw new SafeError(ErrorCode.InvalidRequest);
+            }
+            return this.parameterArray(parsed);
         }
+        if (options.parameters !== undefined) {
+            let inline: unknown;
+            try {
+                inline = JSON.parse(options.parameters);
+            } catch {
+                throw new SafeError(ErrorCode.InvalidRequest);
+            }
+            return this.parameterArray(inline);
+        }
+        return [];
+    }
+
+    /** 校验参数数组形状，交给应用层做最终类型与数量限制。 */
+    private parameterArray(parsed: unknown): Parameter[] {
         if (!Array.isArray(parsed)) throw new SafeError(ErrorCode.InvalidRequest);
         return parsed as Parameter[];
     }
@@ -185,10 +257,16 @@ export class DatabaseCli {
         return [
             'database-query CLI (read-only)',
             'Usage:',
-            '  database-query list [--config FILE]',
-            '  database-query describe --database NAME [--schema NAME] [--table NAME] [--config FILE]',
-            '  database-query query --database NAME [--sql-file FILE|-] [--parameters-file FILE] [--max-rows N] [--config FILE]',
-            'SQL defaults to stdin; parameters-file must contain a JSON array.',
+            '  database-query list',
+            '  database-query show --database NAME',
+            '  database-query describe --database NAME [--schema NAME] [--table NAME|--table-like PATTERN]',
+            '  database-query query --database NAME [--sql-file FILE|-] [--parameters-file FILE|--parameters JSON] [--max-rows N]',
+            '  database-query init',
+            'Sources live in Windows Credential Manager (one credential per database, target prefix database-query.).',
+            'show prints connection details without the password.',
+            'init runs an interactive wizard that creates or replaces such a credential; it requires a TTY.',
+            'SQL defaults to stdin; parameters must be a JSON array from a file or --parameters.',
+            'Values passed via --parameters appear on the command line; prefer files for sensitive values.',
             'Optional --diagnose adds only a safe MySQL stage and allowlisted error code to stderr.',
         ].join('\n');
     }

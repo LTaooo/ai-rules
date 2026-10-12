@@ -1,16 +1,7 @@
-import { DatabaseConfig } from './DatabaseConfig.js';
-
+/** 查询限制集合，全部数据源共用内置安全默认值。 */
 export interface Limits {
     maxRows: number;
     timeoutMs: number;
     maxResponseBytes: number;
     maxConcurrency: number;
-}
-
-export class AppConfig {
-    /** 初始化依赖与资源状态，不在构造期间执行查询。 */
-    constructor(
-        public readonly databases: DatabaseConfig[],
-        public readonly limits: Limits,
-    ) {}
 }

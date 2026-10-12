@@ -1,5 +1,6 @@
 export enum ErrorCode {
     ConfigError = 'CONFIG_ERROR',
+    CredentialError = 'CREDENTIAL_ERROR',
     InvalidRequest = 'INVALID_REQUEST',
     SqlRejected = 'SQL_REJECTED',
     NotFound = 'NOT_FOUND',

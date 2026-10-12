@@ -41,13 +41,13 @@ GRANT SELECT ON sales.order_query_view TO 'mcp_reader'@'trusted-service-host';
 
 SQLite 没有与远端数据库相同的表级用户授权机制。如果文件含有敏感表，不要将整个文件交给 agent 查询，应准备只包含允许数据的专用文件。数据库文件、目录及 WAL 相关文件的权限由管理员设置；不要让服务以管理员身份运行。
 
-SQLite 查询子进程继承同一操作系统账户，只隔离查询的阻塞和超时，不提供身份隔离。`config/databases.json`、`.gitignore` 和 agent 行为约定也不提供同账户强凭证隔离。
+SQLite 查询子进程继承同一操作系统账户，只隔离查询的阻塞和超时，不提供身份隔离。凭据管理器与 agent 行为约定也不提供同账户强凭证隔离。
 
 ## 凭证和网络
 
-- 用户手动维护 `config/databases.json`，限制其他账户的文件读取权限，不将其同步到公开位置。
-- PostgreSQL 远程连接使用验证服务器证书的 TLS 配置；MySQL 使用 JSON 中的 `tls: true` 并配置信任链。不要为了连接成功关闭证书验证。
+- 每个数据源的完整配置（含密码）作为一条通用凭据保存在 Windows 凭据管理器，目标名 `database-query.<别名>`；不存在配置文件。凭据读写由 PowerShell `CredReadW`/`CredWriteW` 完成，内容不进入日志、错误信息或查询数据。
+- PostgreSQL 远程连接使用验证服务器证书的 TLS 配置；MySQL 使用凭据条目中的 `tls: true` 并配置信任链。不要为了连接成功关闭证书验证。
 - MCP 服务、数据库对象和扩展由可信管理员控制。SQL 检查不保证恶意服务器代码没有外部副作用。
 - 只读账户不自动隐藏密码列；通过授予限定视图或限定数据文件限制 agent 可见内容。
-- 定期轮换凭证；修改 `config/databases.json` 后重启服务以加载新配置。已经泄露的凭证必须撤销或轮换，不能只删除文件。
+- 定期轮换密码：用 `cmdkey /delete:database-query.<目标名>` 删除旧凭据，重新运行 `init` 写入新密码。已经泄露的凭证必须撤销或轮换，不能只删除文件。
 - `.gitignore` 不会自动清除已被 Git 跟踪的文件或历史中的秘密。

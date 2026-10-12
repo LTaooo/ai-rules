@@ -6,9 +6,11 @@ import { SafeError } from '../shared/errors/SafeError.js';
 import { ResultProcessor } from '../shared/results/ResultProcessor.js';
 import { SqlPolicy } from '../security/SqlPolicy.js';
 import { Logger } from '../infrastructure/logging/Logger.js';
-import type { AppConfig as Config, Limits } from '../domain/models/AppConfig.js';
+import { SourceSchema } from '../infrastructure/config/SourceSchema.js';
+import type { Limits } from '../domain/models/AppConfig.js';
 import type { DatabaseConfig } from '../domain/models/DatabaseConfig.js';
 import type { DatabaseAdapter } from '../domain/ports/DatabaseAdapter.js';
+import type { SourceRegistry } from '../domain/ports/SourceRegistry.js';
 import type { RawResult, QueryResult } from '../domain/models/QueryResult.js';
 
 export const queryInput = z
@@ -27,6 +29,7 @@ export const describeInput = z
         database: z.string().min(1).max(128),
         schema: z.string().min(1).max(256).optional(),
         table: z.string().min(1).max(256).optional(),
+        tableLike: z.string().min(1).max(256).optional(),
     })
     .strict();
 
@@ -49,28 +52,41 @@ export class QueryService {
     }
 
     private readonly adapters = new Map<string, DatabaseAdapter>();
+    private readonly cachedSources = new Map<string, DatabaseConfig>();
     private readonly active = new Map<string, number>();
     private closed = false;
     private closing: Promise<void> | undefined;
-    /** 初始化依赖与资源状态，不在构造期间执行查询。 */
+    /** 初始化依赖与资源状态，不在构造期间执行查询；数据源来自凭据管理器注册表。 */
     constructor(
-        private readonly config: Config,
+        private readonly registry: SourceRegistry,
+        private readonly limits: Limits = SourceSchema.defaultLimits,
         private readonly factory: (
             config: DatabaseConfig,
         ) => DatabaseAdapter = DatabaseAdapterFactory.create,
         private readonly logger: Logger = new Logger(),
     ) {}
-
-    /** 返回数据源的公开投影，不返回用户名、密码或地址。 */
-    listDatabases(): { name: string; type: string; description?: string }[] {
-        return this.config.databases.map((database) => database.publicInfo);
+    /** 惰性创建适配器并按别名缓存，避免重复建立连接或子进程。 */
+    private adapterFor(source: DatabaseConfig): DatabaseAdapter {
+        let adapter = this.adapters.get(source.name);
+        if (!adapter) {
+            adapter = this.factory(source);
+            this.adapters.set(source.name, adapter);
+        }
+        return adapter;
     }
 
-    /** 查找命名数据源，拒绝已关闭服务与不存在的名称。 */
-    private source(name: string): DatabaseConfig {
+    /** 返回数据源的公开投影，不返回用户名、密码或地址。 */
+    async listDatabases(): Promise<{ name: string; type: string; description?: string }[]> {
+        return (await this.registry.list()).map((database) => database.publicInfo);
+    }
+
+    /** 查找命名数据源并按别名缓存，拒绝已关闭服务与不存在的名称。 */
+    private async source(name: string): Promise<DatabaseConfig> {
         if (this.closed) throw new SafeError(ErrorCode.Closed);
-        const source = this.config.databases.find((database) => database.name === name);
-        if (!source) throw new SafeError(ErrorCode.NotFound);
+        const cached = this.cachedSources.get(name);
+        if (cached) return cached;
+        const source = await this.registry.get(name);
+        this.cachedSources.set(name, source);
         return source;
     }
 
@@ -85,11 +101,7 @@ export class QueryService {
         this.active.set(source.name, count + 1);
         const start = performance.now();
         try {
-            let adapter = this.adapters.get(source.name);
-            if (!adapter) {
-                adapter = this.factory(source);
-                this.adapters.set(source.name, adapter);
-            }
+            const adapter = this.adapterFor(source);
             return ResultProcessor.finishResult(await action(adapter), limits, start);
         } catch (error) {
             throw SafeError.from(error);
@@ -109,14 +121,13 @@ export class QueryService {
         const request = parsed.data;
         this.logger.info(LogEvent.QueryReceived, { requestId, database: request.database });
         try {
-            const source = this.source(request.database);
+            const source = await this.source(request.database);
             const sql = SqlPolicy.validateSql(request.sql, source.type);
             const limits = {
-                ...this.config.limits,
-                maxRows: request.maxRows ?? this.config.limits.maxRows,
+                ...this.limits,
+                maxRows: request.maxRows ?? this.limits.maxRows,
             };
-            if (limits.maxRows > this.config.limits.maxRows)
-                throw new SafeError(ErrorCode.InvalidRequest);
+            if (limits.maxRows > this.limits.maxRows) throw new SafeError(ErrorCode.InvalidRequest);
             const result = await this.execute(source, limits, (adapter) =>
                 adapter.query(sql, request.parameters ?? [], limits),
             );
@@ -139,7 +150,24 @@ export class QueryService {
         }
     }
 
-    /** 使用绑定参数查询可见表结构，拒绝越界 schema，不拼接用户标识符。 */
+    /** 返回除密码外的完整数据源信息，供人工核对接线。 */
+    async showSource(name: string): Promise<Record<string, unknown>> {
+        const source = await this.source(name);
+        return {
+            name: source.name,
+            type: source.type,
+            description: source.description,
+            host: source.host,
+            port: source.port,
+            database: source.database,
+            username: source.username,
+            filename: source.filename,
+            sslMode: source.sslMode,
+            tls: source.tls,
+        };
+    }
+
+    /** 使用绑定参数查询可见表结构；无精确表名时截断视为范围过宽，拒绝返回不完整结构。 */
     async describe(input: unknown): Promise<QueryResult> {
         const requestId = crypto.randomUUID();
         const parsed = describeInput.safeParse(input);
@@ -148,13 +176,18 @@ export class QueryService {
             throw new SafeError(ErrorCode.InvalidRequest);
         }
         const request = parsed.data;
+        if (request.table && request.tableLike) {
+            this.logger.warn(LogEvent.SchemaRejected, { requestId, code: 'INVALID_REQUEST' });
+            throw new SafeError(ErrorCode.InvalidRequest);
+        }
         this.logger.info(LogEvent.SchemaReceived, { requestId, database: request.database });
         try {
-            const source = this.source(request.database);
-            const result = await this.execute(source, this.config.limits, (adapter) =>
-                adapter.describe(request.schema, request.table, this.config.limits),
+            const source = await this.source(request.database);
+            const result = await this.execute(source, this.limits, (adapter) =>
+                adapter.describe(request.schema, request.table, request.tableLike, this.limits),
             );
             if (request.table && result.rowCount === 0) throw new SafeError(ErrorCode.NotFound);
+            if (result.truncated && !request.table) throw new SafeError(ErrorCode.ResultTooLarge);
             this.logger.info(LogEvent.SchemaCompleted, {
                 requestId,
                 database: request.database,
@@ -176,7 +209,7 @@ export class QueryService {
 
     /** 返回完整 MCP 响应可使用的字节上限。 */
     get maxResponseBytes(): number {
-        return this.config.limits.maxResponseBytes;
+        return this.limits.maxResponseBytes;
     }
 
     /** 关闭跟踪中的连接或隔离进程，重复调用不会恢复已关闭服务。 */

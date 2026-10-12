@@ -2,36 +2,35 @@
 
 TypeScript 数据库只读查询工具，同时支持多个命名的 PostgreSQL、MySQL 和 SQLite 数据源。CLI 供人工、脚本、Claude Code 和 Codex 共用；现有 MCP 入口仍保留。
 
-代码当前位于 `~/ai-rule/tools/database-query-mcp/`，目录尚未更名。统一 Skill 位于 `~/ai-rule/skills/database-query-cli/SKILL.md`，只维护调用流程，不复制源码或凭证。
+代码当前位于 `~/ai-rule/tools/database-query-cli/`。统一 Skill 位于 `~/ai-rule/skills/database-query-cli/SKILL.md`，只维护调用流程，不复制源码或凭证。
 
 ## CLI 快速开始
 
-需要 Node.js 24.4 或更新的 24.x 版本。在本工具目录执行 `npm ci` 和 `npm run build`，生成 `dist/cli.js`。不要假定迁移前的 `dist` 已包含 CLI。
+需要 Node.js 24.4 或更新的 24.x 版本。在本工具目录执行 `npm ci` 和 `npm run build`，生成 `dist/cli.js`。
 
 PowerShell 中从任意工作目录调用：
 
 ```powershell
-$tool = Join-Path $HOME 'ai-rule/tools/database-query-mcp'
-$cli = Join-Path $tool 'dist/cli.js'
-# 指定由用户维护的真实配置路径；不要读取或打印配置内容。
-$config = Join-Path $HOME '.config/database-query/databases.json'
+$cli = Join-Path $HOME 'ai-rule/tools/database-query-cli/dist/cli.js'
 
 node $cli --help
-node $cli list --config $config
-node $cli describe --database local --table orders --config $config
-node $cli query --database local --sql-file ./query.sql --parameters-file ./parameters.json --max-rows 100 --config $config
+node $cli init
+node $cli list
+node $cli describe --database local --table orders
+node $cli query --database local --sql-file ./query.sql --parameters-file ./parameters.json --max-rows 100
 ```
 
 最后一条命令的文件示例仅使用虚构值：`query.sql` 内容为 `SELECT id FROM orders WHERE id = ?`，`parameters.json` 内容为 `[123]`。文件由调用者在本次任务目录中准备，使用 UTF-8 无 BOM 编码，不提交查询数据或敏感参数。
 
 SQL 默认从标准输入读取；参数化查询使用 `--sql-file`，若 SQL 来自标准输入则显式指定 `--sql-file -`，参数 JSON 使用独立文件，不同时从 stdin 读取两份输入。当前没有 `--sql`、`--format` 或 CSV 输出选项；具体参数通过顶层 `--help` 查询。
 
-- `list` 返回数据库别名、类型和公开描述。
-- `describe` 返回可见列信息；`query` 返回 `columns`、`rows`、`rowCount`、`truncated`、`durationMs`。
+- `list` 返回数据库别名、类型和公开描述；`show --database <别名>` 返回除密码外的完整连接信息（主机、端口、用户名等）。
+- `describe` 返回可见列信息，支持精确 `--table` 或模糊 `--table-like`（`%` 通配）；无过滤且结果被截断时返回 `RESULT_TOO_LARGE`，应改用过滤。`query` 返回 `columns`、`rows`、`rowCount`、`truncated`、`durationMs`。
 - CLI 成功结果为 stdout JSON；帮助为文本。常规失败在 stderr 输出安全错误码，退出码为 1，成功为 0。CLI 当前关闭请求日志，MCP 日志行为见下文。
 - 显式增加 `--diagnose` 时，MySQL 失败会额外在 stderr 输出固定执行阶段和白名单错误码；不输出驱动原始消息、连接地址、凭证、SQL 或参数。`CONNECT` 表示连接尚未建立，`UNKNOWN` 表示错误码不在公开白名单内，不能据此推断具体原因。
 - CLI 复用 `QueryService`、`SqlPolicy` 和数据库适配器，不通过 Skill 绕过只读保护。每次命令独立启动，并发限制不是跨 CLI 进程的全局限制。
-- 真实 JSON 配置建议放在仓库之外，通过 `--config` 指定；省略时仍读取当前工作目录的 `config/databases.json`。不要把明文凭证纳入 `ai-rule` Git 仓库。
+- 全部数据源配置（含密码）保存在 Windows 凭据管理器：每个数据源一条通用凭据，目标名为 `database-query.<别名>`，内容为整份 JSON 配置。没有任何配置文件；不加载 `.env` 或数据库环境变量，不接入云凭据管理，不使用 `.agentsignore`。
+- `init` 子命令运行交互式向导：询问数据源信息与密码（密码提示不回显），经 PowerShell `CredWriteW` 写入凭据管理器并读回验证。向导需要交互终端，由用户自行运行；命令不再接受任何路径参数。
 
 CLI 目前是新增实现；迁移前 SQLite/MCP 测试通过不代表迁移后的 CLI 已通过验证。使用前执行 `npm run check`，并用独立 SQLite 测试配置验证 CLI，不能用生产配置做冒烟测试。
 
@@ -42,7 +41,7 @@ CLI 目前是新增实现；迁移前 SQLite/MCP 测试通过不代表迁移后�
 - 拒绝写入、删除、DDL、事务管理、多语句、注释、锁定查询、输出文件和未知函数。
 - 使用 AST 递归校验、数据库只读保护和最小权限账户；不能识别的 SQL 不降级放行。
 - 默认最多返回 1000 行、10 秒执行时间、1 MiB MCP 响应，每个数据源最多 4 个并发请求。
-- 数据源、描述、用户名和密码全部保存于 JSON；不加载 `.env` 或数据库环境变量，不接入云凭据管理，不使用 `.agentsignore`。
+- 数据源描述、地址、用户名和凭据目标名保存于 JSON；远程数据库密码只存 Windows 凭据管理器，JSON 不含明文密码。不加载 `.env` 或数据库环境变量，不接入云凭据管理，不使用 `.agentsignore`。
 - 运行日志使用 JSON Lines 写入 stderr，记录启动、停止、请求状态、耗时、行数、截断标识和安全错误码；不记录 SQL、参数、连接串、凭证或查询数据。
 
 只读不等于数据保密。账户只能查询允许 agent 看到的业务表或视图；不要授权保存密码、访问令牌或其他敏感数据的表。数据库扩展、视图、自定义类型和对象定义由可信管理员维护。服务不承诺恶意数据库扩展没有外部副作用。
@@ -56,65 +55,37 @@ CLI 目前是新增实现；迁移前 SQLite/MCP 测试通过不代表迁移后�
 ```powershell
 npm ci
 npm run build
-Copy-Item config/databases.example.json config/databases.json
+node dist/cli.js init
 ```
 
-由用户手动编辑 `config/databases.json` 中的真实连接信息。JSON 中密码是明文，必须用操作系统文件权限限制到服务账户，并保护备份、编辑器历史和部署产物。默认真实配置已被 Git 忽略；自定义路径的真实配置也必须加入忽略规则。不要把其内容粘贴给 agent、提交到 Git 或写入日志。配置文件不提供强隔离：能够读取同一账户文件、使用终端或修改服务代码的 agent 仍可能取得凭证。`AGENTS.md` 是行为约定，不是文件访问控制。旧 `.env` 配置不再支持，也不会自动迁移或读取。
+向导依次询问数据源信息，密码通过不回显的提示输入：整份配置（含密码）作为一条凭据写入 Windows 凭据管理器，不产生任何配置文件。明文只在工具内存中短暂存在（查询阶段同样如此），不落盘、不进日志、不进命令行。删除某个数据源用 `cmdkey /delete:database-query.<别名>`；修改后重新运行 `init`，同名条目确认替换。`AGENTS.md` 是行为约定，不是文件访问控制：能够使用终端或修改服务代码的 agent 仍可能在运行时取得凭证。旧 `.env`、旧版 `databases.json` 均不再支持，也不会自动迁移；对每个数据源重新运行 `init` 重建。
 
-## 配置
+## 数据源与凭据
 
-下面只有虚构凭证：
+每个数据源对应凭据管理器中的一条通用凭据，目标名为 `database-query.<别名>`，内容为该数据源的整份 JSON 配置（含远程密码）。虚构示例：
 
 ```json
 {
-    "limits": {
-        "maxRows": 1000,
-        "timeoutMs": 10000,
-        "maxResponseBytes": 1048576,
-        "maxConcurrency": 4
-    },
-    "databases": [
-        {
-            "name": "sales",
-            "type": "postgres",
-            "description": "Sales query source",
-            "host": "localhost",
-            "port": 5432,
-            "database": "sales",
-            "username": "fictional_reader",
-            "password": "replace_me",
-            "sslMode": "verify-full"
-        },
-        {
-            "name": "analytics",
-            "type": "mysql",
-            "description": "Analytics query source",
-            "host": "localhost",
-            "port": 3306,
-            "database": "analytics",
-            "username": "fictional_reader",
-            "password": "replace_me",
-            "tls": true
-        },
-        {
-            "name": "local",
-            "type": "sqlite",
-            "description": "Local read-only source",
-            "filename": "D:/data/existing.sqlite"
-        }
-    ]
+    "name": "sales",
+    "type": "postgres",
+    "description": "Sales query source",
+    "host": "sales-db.internal",
+    "port": 5432,
+    "database": "sales",
+    "username": "fictional_reader",
+    "password": "replace_with_real_password",
+    "sslMode": "verify-full"
 }
 ```
 
-- 默认读取工作目录下 `config/databases.json`。可用 `npm start -- --config ./config/databases.json` 或 `node dist/index.js --config <path>` 指定；相对路径基于工作目录。
-- 顶层只接受 `limits`、`databases`。每个数据源必填 `name`、`type`、`description`；别名唯一，允许字母、数字、下划线和连字符，最多 128 字符；允许 1–64 个数据源，同类型可有多个实例。
-- 远程数据库必填 `host`、`database`、`username`、`password`，端口必须是 1–65535 的整数，缺省为 PostgreSQL 5432、MySQL 3306。不使用 URL，密码中的特殊字符直接按 JSON 字符串转义，不做 URL 编码。
-- SQLite 必须使用已有普通文件的绝对 `filename`，Linux 示例为 `/srv/data/existing.sqlite`。不允许 `:memory:`，不会创建缺失文件。
+- 每个数据源必填 `name`、`type`、`description`；别名唯一，允许字母、数字、下划线和连字符，最多 128 字符。条目数量上限 64。
+- 远程数据库必填 `host`、`database`、`username`、`password`，端口必须是 1–65535 的整数，缺省为 PostgreSQL 5432、MySQL 3306。密码长度 1–1024。不使用 URL。
+- SQLite 必须使用绝对 `filename`，不允许 `:memory:`；SQLite 条目没有密码字段，文件缺失在查询时报数据库错误。
 - PostgreSQL `sslMode` 为 `disable`、`require` 或 `verify-full`，默认 `require`（加密但不验证证书）；远程连接建议 `verify-full` 并配置信任链。
-- MySQL 支持 5.6.5+ 的 5.6、5.7 和 8.x；每次连接通过内部版本查询选择超时策略。仅接受数字版本及 `-log`、`-community`、`-community-log` 后缀；MariaDB、未知厂商后缀、其他版本系列和非法版本在业务查询前拒绝。`tls` 只接受布尔值，默认 false，true 时验证服务器证书。未知字段、旧 URL 和环境凭证引用全部拒绝，不能开启多语句。
+- MySQL 支持 5.6.5+ 的 5.6、5.7 和 8.x；每次连接通过内部版本查询选择超时策略。仅接受数字版本及 `-log`、`-community`、`-community-log` 后缀；MariaDB、未知厂商后缀、其他版本系列和非法版本在业务查询前拒绝。`tls` 只接受布尔值，默认 false，true 时验证服务器证书。未知字段一律拒绝，不能开启多语句。
 - MySQL 5.6 和 5.7.0–5.7.7 仅有客户端超时及强制断连，没有服务端执行时限；关闭本地 Socket 不保证服务端查询立即停止。5.7.8+ 和 8.x 保留 `MAX_EXECUTION_TIME`。旧版本已停止维护，建议升级，并由管理员配置独立资源约束。SQL 不自动改写为旧版方言。
 - 描述是公开信息，不要在描述、别名中写入密码、连接串或私密地址。
-- 行数硬上限为 10000，超时硬上限为 60000 毫秒，响应硬上限为 10 MiB，并发硬上限为每数据源 16；配置必须为正整数。
+- 行数硬上限 1000（可调至 10000）、超时 10 秒（至 60000 毫秒）、响应 1 MiB（至 10 MiB）、并发每数据源 4（至 16）为内置默认，当前版本不接受外部覆盖。
 
 ## 运行与 MCP 客户端
 
@@ -128,24 +99,20 @@ Copy-Item config/databases.example.json config/databases.json
 
 日志中的数据源别名来自配置，查询内容和参数不会写入日志。错误日志只使用 `ErrorCode`，不输出数据库驱动原始异常。
 
-若客户端不设置工作目录，使用显式绝对配置路径启动：
+MCP 服务与 CLI 共用凭据管理器中的数据源，不需要任何路径参数：
 
 ```json
 {
     "mcpServers": {
         "database-query": {
             "command": "node",
-            "args": [
-                "C:/Users/<用户名>/ai-rule/tools/database-query-mcp/dist/index.js",
-                "--config",
-                "C:/Users/<用户名>/.config/database-query/databases.json"
-            ]
+            "args": ["C:/Users/<用户名>/ai-rule/tools/database-query-cli/dist/index.js"]
         }
     }
 }
 ```
 
-将路径替换为实际部署目录。配置只出现文件路径，不包含数据库密码，但客户端自身仍可能具有读取该文件的权限。服务不开放读取凭证、文件或环境变量的工具。
+将路径替换为实际部署目录。服务不开放读取凭据、文件或环境变量的工具。
 
 ## 工具
 
@@ -156,10 +123,10 @@ Copy-Item config/databases.example.json config/databases.json
 ### `describe_schema`
 
 ```json
-{ "database": "sales", "schema": "public", "table": "orders" }
+{ "database": "sales", "schema": "public", "table": "orders", "tableLike": "order%" }
 ```
 
-返回统一的列信息查询结果，列包括 `schema_name`、`table_name`、`table_type`、`column_name`、`data_type`、`nullable`、`primary_key`。可不填 table，查询可见结构；PostgreSQL 默认 public。SQLite 不接受 schema，MySQL 的 schema 只能是当前配置数据库。
+`table` 精确匹配，`tableLike` 模糊过滤（`%` 通配），两者互斥且至少给出一个的行为建议：无过滤且结果被截断时返回 `RESULT_TOO_LARGE`。返回统一的列信息查询结果，列包括 `schema_name`、`table_name`、`table_type`、`column_name`、`data_type`、`nullable`、`primary_key`。可不填 table，查询可见结构；PostgreSQL 默认 public。SQLite 不接受 schema，MySQL 的 schema 只能是当前配置数据库。
 
 ### `query_database`
 
@@ -194,7 +161,8 @@ PostgreSQL 使用 `$1`、`$2` 等占位符，MySQL 和 SQLite 使用 `?`。参�
 
 | 错误码             | 含义                                 |
 | ------------------ | ------------------------------------ |
-| CONFIG_ERROR       | 缺失或不合法的配置                   |
+| CONFIG_ERROR       | 数据源凭据内容缺失或不合法           |
+| CREDENTIAL_ERROR   | 凭据缺失、不可读或写入失败           |
 | INVALID_REQUEST    | 输入或限额不合法                     |
 | SQL_REJECTED       | SQL 不在只读许可范围内               |
 | NOT_FOUND          | 数据源或指定表不可见或不存在         |
@@ -224,11 +192,13 @@ check 执行格式检查、ESLint、源码和测试类型检查、编译和测�
 
 默认测试使用真实 SQLite 临时文件、真实 stdio MCP 客户端及隔离临时 Git 仓库；所有临时文件在 `.test-artifacts` 内。Git 钩子测试不创建提交。
 
-PostgreSQL、MySQL 的连接策略、超时和清理用伪驱动验证；额外使用真实 mysql2 驱动和本机假协议端点验证底层 Socket 在超时和退出时确实销毁。`npm test` 和 `npm run check` 在独立子进程中清除旧远端测试 URL 变量与 `MCP_TEST_DATABASE_CONFIG`，始终跳过真实远端数据库集成。必须单独授权并准备独立测试实例和专用只读账户后，才能通过直接运行 Vitest 并提供 `MCP_TEST_DATABASE_CONFIG` 的隔离 JSON 路径启用外部测试；不能使用生产配置。默认检查从不读取业务 `.env` 或真实 JSON。结构测试使用 TypeScript AST 约束源码类组织与每个命名方法的中文 JSDoc。
+PostgreSQL、MySQL 的连接策略、超时和清理用伪驱动验证；额外使用真实 mysql2 驱动和本机假协议端点验证底层 Socket 在超时和退出时确实销毁。凭据读写用注入的伪子进程验证协议、超时与错误映射，不触碰真实凭据管理器。CLI 与 MCP 的测试组合根支持仅限测试的环境变量 `DATABASE_QUERY_TEST_SOURCES`（JSON 数组，只放合成 SQLite 数据源）；`npm test` 和 `npm run check` 在独立子进程中清除 `MCP_TEST_*` 与该变量，默认检查从不读取业务 `.env`、真实凭据或任何配置文件。结构测试使用 TypeScript AST 约束源码类组织与每个命名方法的中文 JSDoc。
 
 ## 迁移清理状态
 
-JSON 与分类源码迁移已接通。旧源码备份、旧测试备份、迁移辅助脚本和旧 `.env.example` 已清理；`dist` 已删除后从当前分类源码重新构建，不再包含历史编译模块。当前配置示例为 `config/databases.example.json`。正式部署仅发布当前源码构建的产物，不包含测试临时文件或真实凭证配置。
+JSON 与分类源码迁移已接通。旧源码备份、旧测试备份、迁移辅助脚本和旧 `.env.example` 已清理；`dist` 从当前分类源码重新构建，不包含历史编译模块。正式部署仅发布当前源码构建的产物，不包含测试临时文件或真实凭证。
+
+存储迁移后不再存在任何配置文件：数据源（含密码）整体保存在 Windows 凭据管理器。旧 `databases.json`、`.env` 一律不被读取；对每个数据源重新运行 `init`，同名条目确认替换即可完成迁移，工具不自动改写用户数据。
 
 ## 文件结构
 
@@ -239,12 +209,12 @@ database-query-mcp/
 │   ├── domain/enums/、models/、ports/
 │   ├── application/QueryService.ts
 │   ├── security/SqlPolicy.ts
-│   ├── infrastructure/config/、logging/、database/
+│   ├── infrastructure/config/、credentials/、logging/、database/
 │   │   └── database/postgres/、mysql/、sqlite/（含隔离 worker）
 │   ├── presentation/mcp/DatabaseMcpServer.ts
+│   ├── presentation/cli/DatabaseCli.ts、cli/InitWizard.ts
 │   └── shared/errors/、results/
-├── tests/unit/、integration/、helpers/
-├── config/databases.example.json
+├── tests/unit/、integration/
 ├── scripts/install-hooks.mjs / run-tests.mjs
 ├── .husky/pre-commit
 ├── .github/workflows/ci.yml

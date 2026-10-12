@@ -62,16 +62,17 @@ export class SqliteAdapter implements DatabaseAdapter {
         });
     }
 
-    /** 使用绑定参数查询可见表结构，拒绝越界 schema，不拼接用户标识符。 */
+    /** 使用绑定参数查询可见表结构；table 精确匹配，tableLike 模糊过滤，拒绝越界 schema。 */
     async describe(
         schema: string | undefined,
         table: string | undefined,
+        tableLike: string | undefined,
         limits: Limits,
     ): Promise<RawResult> {
         if (schema) throw new SafeError(ErrorCode.InvalidRequest);
         return this.query(
-            "SELECT NULL AS schema_name, m.name AS table_name, m.type AS table_type, p.name AS column_name, p.type AS data_type, p.\"notnull\" = 0 AS nullable, p.pk > 0 AS primary_key FROM sqlite_schema AS m JOIN pragma_table_info(m.name) AS p WHERE m.type IN ('table', 'view') AND m.name NOT LIKE 'sqlite_%' AND (? IS NULL OR m.name = ?) ORDER BY m.name, p.cid",
-            [table ?? null, table ?? null],
+            "SELECT NULL AS schema_name, m.name AS table_name, m.type AS table_type, p.name AS column_name, p.type AS data_type, p.\"notnull\" = 0 AS nullable, p.pk > 0 AS primary_key FROM sqlite_schema AS m JOIN pragma_table_info(m.name) AS p WHERE m.type IN ('table', 'view') AND m.name NOT LIKE 'sqlite_%' AND (? IS NULL OR m.name = ?) AND (? IS NULL OR m.name LIKE ?) ORDER BY m.name, p.cid",
+            [table ?? null, table ?? null, tableLike ?? null, tableLike ?? null],
             limits,
         );
     }

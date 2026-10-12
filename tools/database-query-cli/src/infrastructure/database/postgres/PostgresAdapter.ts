@@ -129,15 +129,16 @@ export class PostgresAdapter implements DatabaseAdapter {
         }
     }
 
-    /** 使用绑定参数查询可见表结构，拒绝越界 schema，不拼接用户标识符。 */
+    /** 使用绑定参数查询可见表结构；table 精确匹配，tableLike 模糊过滤，拒绝越界 schema。 */
     async describe(
         schema: string | undefined,
         table: string | undefined,
+        tableLike: string | undefined,
         limits: Limits,
     ): Promise<RawResult> {
         return this.query(
-            "SELECT n.nspname AS schema_name, c.relname AS table_name, CASE WHEN c.relkind = 'v' THEN 'view' ELSE 'table' END AS table_type, a.attname AS column_name, pg_catalog.format_type(a.atttypid, a.atttypmod) AS data_type, NOT a.attnotnull AS nullable, EXISTS (SELECT 1 FROM pg_catalog.pg_index i WHERE i.indrelid = c.oid AND i.indisprimary AND a.attnum = ANY(i.indkey)) AS primary_key FROM pg_catalog.pg_class c JOIN pg_catalog.pg_namespace n ON n.oid = c.relnamespace JOIN pg_catalog.pg_attribute a ON a.attrelid = c.oid WHERE n.nspname = $1 AND c.relkind IN ('r', 'p', 'v', 'm') AND a.attnum > 0 AND NOT a.attisdropped AND ($2::text IS NULL OR c.relname = $2) AND has_table_privilege(c.oid, 'SELECT') ORDER BY c.relname, a.attnum",
-            [schema ?? 'public', table ?? null],
+            "SELECT n.nspname AS schema_name, c.relname AS table_name, CASE WHEN c.relkind = 'v' THEN 'view' ELSE 'table' END AS table_type, a.attname AS column_name, pg_catalog.format_type(a.atttypid, a.atttypmod) AS data_type, NOT a.attnotnull AS nullable, EXISTS (SELECT 1 FROM pg_catalog.pg_index i WHERE i.indrelid = c.oid AND i.indisprimary AND a.attnum = ANY(i.indkey)) AS primary_key FROM pg_catalog.pg_class c JOIN pg_catalog.pg_namespace n ON n.oid = c.relnamespace JOIN pg_catalog.pg_attribute a ON a.attrelid = c.oid WHERE n.nspname = $1 AND c.relkind IN ('r', 'p', 'v', 'm') AND a.attnum > 0 AND NOT a.attisdropped AND ($2::text IS NULL OR c.relname = $2) AND ($3::text IS NULL OR c.relname LIKE $3) AND has_table_privilege(c.oid, 'SELECT') ORDER BY c.relname, a.attnum",
+            [schema ?? 'public', table ?? null, tableLike ?? null],
             limits,
         );
     }

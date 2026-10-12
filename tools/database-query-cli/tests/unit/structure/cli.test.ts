@@ -1,7 +1,6 @@
 import { PassThrough } from 'node:stream';
 import { afterEach, expect, it, vi } from 'vitest';
 import { DatabaseCli } from '../../../src/presentation/cli/DatabaseCli.js';
-import { ConfigLoader } from '../../../src/infrastructure/config/ConfigLoader.js';
 import { QueryService } from '../../../src/application/QueryService.js';
 import { SafeError } from '../../../src/shared/errors/SafeError.js';
 import { DatabaseStage } from '../../../src/domain/enums/DatabaseStage.js';
@@ -13,10 +12,6 @@ it.each([false, true])(
     async (diagnose) => {
         const stdout = new PassThrough();
         const stderr = new PassThrough();
-        vi.spyOn(ConfigLoader.prototype, 'load').mockReturnValue({
-            databases: [],
-            limits: { maxRows: 10, timeoutMs: 1000, maxResponseBytes: 10000, maxConcurrency: 1 },
-        });
         vi.spyOn(QueryService.prototype, 'describe').mockRejectedValue(
             SafeError.database(
                 { code: 'ECONNREFUSED', message: 'synthetic private detail' },
@@ -37,13 +32,11 @@ it.each([false, true])(
     },
 );
 
-it('rejects query-only row limits on list before loading configuration', async () => {
+it('rejects query-only row limits on list before touching sources', async () => {
     const stdout = new PassThrough();
     const stderr = new PassThrough();
-    const load = vi.spyOn(ConfigLoader.prototype, 'load');
     const status = await new DatabaseCli(stdout, stderr).run(['list', '--max-rows', '2']);
     expect(status).toBe(1);
-    expect(load).not.toHaveBeenCalled();
     expect(stdout.read()).toBeNull();
     expect(stderr.read()?.toString()).toBe('INVALID_REQUEST\n');
 });
@@ -51,10 +44,7 @@ it('rejects query-only row limits on list before loading configuration', async (
 it('sanitizes close failures without publishing a successful result', async () => {
     const stdout = new PassThrough();
     const stderr = new PassThrough();
-    vi.spyOn(ConfigLoader.prototype, 'load').mockReturnValue({
-        databases: [],
-        limits: { maxRows: 10, timeoutMs: 1000, maxResponseBytes: 10000, maxConcurrency: 1 },
-    });
+    vi.spyOn(QueryService.prototype, 'listDatabases').mockResolvedValue([]);
     vi.spyOn(QueryService.prototype, 'close').mockRejectedValue(
         new Error('synthetic private driver detail'),
     );

@@ -1,7 +1,8 @@
 import { afterEach, describe, expect, it, vi } from 'vitest';
 import type { EventEmitter as EventEmitterType } from 'node:events';
 import type { Readable as ReadableType } from 'node:stream';
-import type { AppConfig as Config } from '../../../src/domain/models/AppConfig.js';
+import type { Limits } from '../../../src/domain/models/AppConfig.js';
+import type { DatabaseConfig } from '../../../src/domain/models/DatabaseConfig.js';
 
 const mocks = vi.hoisted(() => ({
     clients: [] as unknown[],
@@ -118,7 +119,29 @@ vi.mock('mysql2', async () => {
 
 import { PostgresAdapter } from '../../../src/infrastructure/database/postgres/PostgresAdapter.js';
 import { MysqlAdapter } from '../../../src/infrastructure/database/mysql/MysqlAdapter.js';
-import { fixtureConfig as loadConfig } from '../../helpers/FixtureConfig.js';
+import { SourceSchema } from '../../../src/infrastructure/config/SourceSchema.js';
+
+/** 将测试内虚构 URL 解析为经验证的数据源配置，不读取任何文件。 */
+function sourceUrl(url: string): DatabaseConfig {
+    const parsed = new URL(url);
+    const mysql = parsed.protocol === 'mysql:';
+    return SourceSchema.validateDatabase({
+        name: 'test',
+        type: mysql ? 'mysql' : 'postgres',
+        description: 'Synthetic',
+        host: parsed.hostname,
+        port: Number(parsed.port || (mysql ? 3306 : 5432)),
+        database: parsed.pathname.slice(1),
+        username: decodeURIComponent(parsed.username),
+        password: decodeURIComponent(parsed.password),
+        ...(mysql ? { tls: false } : { sslMode: 'disable' }),
+    });
+}
+
+/** 以内置默认限制为基础构造用例限制。 */
+function limits(overrides: Partial<Limits> = {}): Limits {
+    return { ...SourceSchema.defaultLimits, ...overrides };
+}
 
 afterEach(() => {
     mocks.clients.length = 0;
@@ -132,14 +155,10 @@ afterEach(() => {
 describe('remote adapters with fake drivers', () => {
     it('passes structured JSON credentials directly to drivers without connection URLs', async () => {
         for (const type of ['postgres', 'mysql'] as const) {
-            const config = loadConfig({
-                DB_TEST_URL: `${type}://fake-reader:fake%40password@localhost:1234/fake`,
-            });
+            const source = sourceUrl(`${type}://fake-reader:fake%40password@localhost:1234/fake`);
             const adapter =
-                type === 'postgres'
-                    ? new PostgresAdapter(config.databases[0]!)
-                    : new MysqlAdapter(config.databases[0]!);
-            await adapter.query('SELECT 1', [], config.limits);
+                type === 'postgres' ? new PostgresAdapter(source) : new MysqlAdapter(source);
+            await adapter.query('SELECT 1', [], limits());
             const options = type === 'postgres' ? mocks.postgresOptions[0] : mocks.mysqlOptions[0];
             expect(options).toMatchObject({
                 host: 'localhost',
@@ -154,11 +173,8 @@ describe('remote adapters with fake drivers', () => {
     });
     it('refuses PostgreSQL when read-only protection was not established', async () => {
         mocks.mode = 'unsafe';
-        const config = loadConfig({ DB_TEST_URL: 'postgresql://reader:fake@localhost/db' });
-        const adapter = new PostgresAdapter(config.databases[0]!);
-        await expect(adapter.query('SELECT 1', [], config.limits)).rejects.toThrow(
-            'READ_ONLY_REQUIRED',
-        );
+        const adapter = new PostgresAdapter(sourceUrl('postgresql://reader:fake@localhost/db'));
+        await expect(adapter.query('SELECT 1', [], limits())).rejects.toThrow('READ_ONLY_REQUIRED');
         const client = mocks.clients[0] as { end: ReturnType<typeof vi.fn> };
         expect(client.end).toHaveBeenCalled();
         await adapter.close();
@@ -166,12 +182,10 @@ describe('remote adapters with fake drivers', () => {
 
     it('terminates timed-out PostgreSQL connections', async () => {
         mocks.mode = 'hang';
-        const config = loadConfig({
-            DB_TEST_URL: 'postgresql://reader:fake@localhost/db',
-            MCP_DB_QUERY_TIMEOUT_MS: '50',
-        });
-        const adapter = new PostgresAdapter(config.databases[0]!);
-        await expect(adapter.query('SELECT 1', [], config.limits)).rejects.toThrow('TIMEOUT');
+        const adapter = new PostgresAdapter(sourceUrl('postgresql://reader:fake@localhost/db'));
+        await expect(adapter.query('SELECT 1', [], limits({ timeoutMs: 50 }))).rejects.toThrow(
+            'TIMEOUT',
+        );
         const client = mocks.clients[0] as { end: ReturnType<typeof vi.fn> };
         expect(client.end).toHaveBeenCalled();
         await adapter.close();
@@ -179,24 +193,19 @@ describe('remote adapters with fake drivers', () => {
 
     it('terminates timed-out MySQL streams and connections', async () => {
         mocks.mode = 'hang';
-        const config = loadConfig({
-            DB_TEST_URL: 'mysql://reader:fake@localhost/db',
-            MCP_DB_QUERY_TIMEOUT_MS: '50',
-        });
-        const adapter = new MysqlAdapter(config.databases[0]!);
-        await expect(adapter.query('SELECT 1', [], config.limits)).rejects.toThrow('TIMEOUT');
+        const adapter = new MysqlAdapter(sourceUrl('mysql://reader:fake@localhost/db'));
+        await expect(adapter.query('SELECT 1', [], limits({ timeoutMs: 50 }))).rejects.toThrow(
+            'TIMEOUT',
+        );
         const connection = mocks.mysqlConnections[0] as { destroy: ReturnType<typeof vi.fn> };
         expect(connection.destroy).toHaveBeenCalled();
         await adapter.close();
     });
 
     it('runs PostgreSQL in a read-only transaction and always rolls back', async () => {
-        const config: Config = loadConfig({
-            DB_TEST_URL: 'postgresql://reader:fake@localhost/db',
-            MCP_DB_MAX_ROWS: '2',
-        });
-        const adapter = new PostgresAdapter(config.databases[0]!);
-        const result = await adapter.query('SELECT id FROM users', [], config.limits);
+        const source = sourceUrl('postgresql://reader:fake@localhost/db');
+        const adapter = new PostgresAdapter(source);
+        const result = await adapter.query('SELECT id FROM users', [], limits({ maxRows: 2 }));
         expect(result.rows).toHaveLength(3);
         const client = mocks.clients[0] as {
             query: ReturnType<typeof vi.fn>;
@@ -212,9 +221,8 @@ describe('remote adapters with fake drivers', () => {
         'accepts legacy MySQL %s without MAX_EXECUTION_TIME',
         async (version) => {
             mocks.mysqlVersion = version;
-            const config = loadConfig({ DB_TEST_URL: 'mysql://reader:fake@localhost/db' });
-            const adapter = new MysqlAdapter(config.databases[0]!);
-            await adapter.query('SELECT 1', [], config.limits);
+            const adapter = new MysqlAdapter(sourceUrl('mysql://reader:fake@localhost/db'));
+            await adapter.query('SELECT 1', [], limits());
             const connection = mocks.mysqlConnections[0] as { promise: ReturnType<typeof vi.fn> };
             const promise = connection.promise.mock.results[0]?.value as {
                 query: ReturnType<typeof vi.fn>;
@@ -234,23 +242,18 @@ describe('remote adapters with fake drivers', () => {
         'rejects unsupported MySQL version %s',
         async (version) => {
             mocks.mysqlVersion = version;
-            const config = loadConfig({ DB_TEST_URL: 'mysql://reader:fake@localhost/db' });
-            const adapter = new MysqlAdapter(config.databases[0]!);
-            await expect(adapter.query('SELECT 1', [], config.limits)).rejects.toThrow(
-                'DATABASE_ERROR',
-            );
+            const adapter = new MysqlAdapter(sourceUrl('mysql://reader:fake@localhost/db'));
+            await expect(adapter.query('SELECT 1', [], limits())).rejects.toThrow('DATABASE_ERROR');
             await adapter.close();
         },
     );
 
     it('times out while checking the MySQL version and cleans up', async () => {
         mocks.mode = 'version-hang';
-        const config = loadConfig({
-            DB_TEST_URL: 'mysql://reader:fake@localhost/db',
-            MCP_DB_QUERY_TIMEOUT_MS: '50',
-        });
-        const adapter = new MysqlAdapter(config.databases[0]!);
-        await expect(adapter.query('SELECT 1', [], config.limits)).rejects.toThrow('TIMEOUT');
+        const adapter = new MysqlAdapter(sourceUrl('mysql://reader:fake@localhost/db'));
+        await expect(adapter.query('SELECT 1', [], limits({ timeoutMs: 50 }))).rejects.toThrow(
+            'TIMEOUT',
+        );
         expect(
             (mocks.mysqlConnections[0] as { destroy: ReturnType<typeof vi.fn> }).destroy,
         ).toHaveBeenCalled();
@@ -262,9 +265,8 @@ describe('remote adapters with fake drivers', () => {
         async (version) => {
             mocks.mysqlVersion = version;
             mocks.mode = 'timeout-setup-fail';
-            const config = loadConfig({ DB_TEST_URL: 'mysql://reader:fake@localhost/db' });
-            const adapter = new MysqlAdapter(config.databases[0]!);
-            await expect(adapter.query('SELECT 1', [], config.limits)).rejects.toMatchObject({
+            const adapter = new MysqlAdapter(sourceUrl('mysql://reader:fake@localhost/db'));
+            await expect(adapter.query('SELECT 1', [], limits())).rejects.toMatchObject({
                 code: 'DATABASE_ERROR',
                 diagnostic: { stage: 'TIMEOUT_SETUP', reason: 'ER_UNKNOWN_SYSTEM_VARIABLE' },
             });
@@ -281,9 +283,8 @@ describe('remote adapters with fake drivers', () => {
     it('requires read-only setup even on MySQL 5.6', async () => {
         mocks.mysqlVersion = '5.6.51';
         mocks.mode = 'readonly-fail';
-        const config = loadConfig({ DB_TEST_URL: 'mysql://reader:fake@localhost/db' });
-        const adapter = new MysqlAdapter(config.databases[0]!);
-        await expect(adapter.query('SELECT 1', [], config.limits)).rejects.toMatchObject({
+        const adapter = new MysqlAdapter(sourceUrl('mysql://reader:fake@localhost/db'));
+        await expect(adapter.query('SELECT 1', [], limits())).rejects.toMatchObject({
             code: 'DATABASE_ERROR',
             diagnostic: { stage: 'READ_ONLY' },
         });
@@ -294,12 +295,8 @@ describe('remote adapters with fake drivers', () => {
     });
 
     it('streams MySQL prepared results with a read-only transaction and server timeout', async () => {
-        const config = loadConfig({
-            DB_TEST_URL: 'mysql://reader:fake@localhost/db',
-            MCP_DB_MAX_ROWS: '2',
-        });
-        const adapter = new MysqlAdapter(config.databases[0]!);
-        const result = await adapter.query('SELECT ? AS id', [1], config.limits);
+        const adapter = new MysqlAdapter(sourceUrl('mysql://reader:fake@localhost/db'));
+        const result = await adapter.query('SELECT ? AS id', [1], limits({ maxRows: 2 }));
         expect(result.rows).toHaveLength(3);
         const connection = mocks.mysqlConnections[0] as {
             execute: ReturnType<typeof vi.fn>;
