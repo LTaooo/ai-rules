@@ -27,12 +27,7 @@ export class ResultProcessor {
         return value;
     }
 
-    /**
-     * 计算规范化 JSON 的 UTF-8 字节数，超出上限抛出安全错误。
-     * @param value 待统计的规范化值。
-     * @param maximum 允许的最大字节数。
-     * @returns 实际 UTF-8 字节数。
-     */
+    /** 计算规范化 JSON 的 UTF-8 字节数，超出上限抛出安全错误。 */
     public static checkBytes(value: unknown, maximum: number): number {
         const bytes = Buffer.byteLength(JSON.stringify(ResultProcessor.normalize(value)));
         if (bytes > maximum) throw new SafeError(ErrorCode.ResultTooLarge);
@@ -41,9 +36,7 @@ export class ResultProcessor {
 
     /**
      * 截断超额行并规范化结果，校验返回字节数与记录执行耗时。
-     * @param raw 适配器返回的原始结果。
-     * @param limits 行数与响应大小限制。
-     * @param start 查询开始的性能时钟读数。
+     * @param start 查询开始的性能时钟读数，用于计算 durationMs。
      * @returns 规范化后的最终查询结果。
      */
     public static finishResult(raw: RawResult, limits: Limits, start: number): QueryResult {

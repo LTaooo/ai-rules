@@ -45,11 +45,7 @@ export class SafeError extends Error {
         return safe;
     }
 
-    /**
-     * 创建仅含原因类别的凭据安全错误，不包含目标名、系统消息或密钥内容。
-     * @param reason 凭据失败的安全原因类别。
-     * @returns 携带原因诊断的凭据安全错误。
-     */
+    /** 创建仅含原因类别的凭据安全错误，不包含目标名、系统消息或密钥内容。 */
     public static credential(reason: CredentialFailure): SafeError {
         const error = new SafeError(ErrorCode.CredentialError);
         error.diagnostic = { reason };

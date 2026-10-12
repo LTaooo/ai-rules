@@ -148,7 +148,6 @@ export class WindowsCredentialStore implements SourceRegistry, SourceWriter {
 
     /**
      * 按别名读取并校验数据源配置；别名不存在时抛出 NotFound。
-     * @param name 数据源别名。
      * @returns 含密码的完整数据源领域配置。
      */
     public async get(name: string): Promise<DatabaseConfig> {

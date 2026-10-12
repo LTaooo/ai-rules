@@ -159,7 +159,6 @@ export class QueryService {
 
     /**
      * 返回数据源的业务标识与 TLS 配置，不包含主机、端口、用户名等侦察信息。
-     * @param name 数据源别名。
      * @returns 除密码与连接地址外的数据源标识字段。
      */
     async showSource(name: string): Promise<Record<string, unknown>> {

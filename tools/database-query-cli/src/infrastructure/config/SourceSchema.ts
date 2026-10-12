@@ -18,7 +18,6 @@ export class SourceSchema {
     public static readonly namePattern = /^[A-Za-z0-9_][A-Za-z0-9_-]{0,127}$/;
     /**
      * 校验单条数据源对象并构造领域配置；密码字段仅存在于凭据 blob 的 JSON 中。
-     * @param value 待校验的原始数据源对象。
      * @returns 不可变的数据源领域配置。
      */
     public static validateDatabase(value: unknown): DatabaseConfig {
