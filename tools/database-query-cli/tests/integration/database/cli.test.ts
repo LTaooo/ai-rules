@@ -48,6 +48,12 @@ it('runs compiled CLI list, describe, count and rejects writes against injected 
         const filtered = run(['describe', '--database', 'local', '--table-like', 'boo%']);
         expect(filtered.status).toBe(0);
         expect(JSON.parse(filtered.stdout).rowCount).toBeGreaterThan(0);
+        const globbed = run(['describe', '--database', 'local', '--table-like', 'boo*']);
+        expect(globbed.status).toBe(0);
+        expect(JSON.parse(globbed.stdout).rowCount).toBeGreaterThan(0);
+        const contains = run(['describe', '--database', 'local', '--table-like', 'book']);
+        expect(contains.status).toBe(0);
+        expect(JSON.parse(contains.stdout).rowCount).toBeGreaterThan(0);
         const inline = run(
             ['query', '--database', 'local', '--parameters', '[1]'],
             'SELECT id FROM book WHERE id = ?',

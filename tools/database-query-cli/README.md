@@ -126,7 +126,7 @@ MCP 服务与 CLI 共用凭据管理器中的数据源，不需要任何路径�
 { "database": "sales", "schema": "public", "table": "orders", "tableLike": "order%" }
 ```
 
-`table` 精确匹配，`tableLike` 模糊过滤（`%` 通配），两者互斥且至少给出一个的行为建议：无过滤且结果被截断时返回 `RESULT_TOO_LARGE`。返回统一的列信息查询结果，列包括 `schema_name`、`table_name`、`table_type`、`column_name`、`data_type`、`nullable`、`primary_key`。可不填 table，查询可见结构；PostgreSQL 默认 public。SQLite 不接受 schema，MySQL 的 schema 只能是当前配置数据库。
+`table` 精确匹配；`tableLike` 模糊过滤——不含 `%` 时按包含匹配（`*`、`?` 自动转译为通配符），含 `%` 时按 SQL LIKE 原样使用。两者互斥；无过滤且结果被截断时返回 `RESULT_TOO_LARGE`。返回统一的列信息查询结果，列包括 `schema_name`、`table_name`、`table_type`、`column_name`、`data_type`、`nullable`、`primary_key`。可不填 table，查询可见结构；PostgreSQL 默认 public。SQLite 不接受 schema，MySQL 的 schema 只能是当前配置数据库。
 
 ### `query_database`
 

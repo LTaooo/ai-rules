@@ -266,6 +266,7 @@ export class DatabaseCli {
             'show prints connection details without the password.',
             'init runs an interactive wizard that creates or replaces such a credential; it requires a TTY.',
             'SQL defaults to stdin; parameters must be a JSON array from a file or --parameters.',
+            '--table-like does a contains match on table names; % and _ are SQL wildcards, * is translated to %.',
             'Values passed via --parameters appear on the command line; prefer files for sensitive values.',
             'Optional --diagnose adds only a safe MySQL stage and allowlisted error code to stderr.',
         ].join('\n');

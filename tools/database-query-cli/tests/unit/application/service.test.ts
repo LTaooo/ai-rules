@@ -110,15 +110,23 @@ describe('query service', () => {
         expect(adapter.query).not.toHaveBeenCalled();
     });
 
-    it('passes table-like filters through to describe', async () => {
+    it('normalizes table-like patterns from contains and glob habits', async () => {
         const { service, adapter } = setup();
-        await service.describe({ database: 'sales', tableLike: 'spu%' });
-        expect(adapter.describe).toHaveBeenCalledWith(
-            undefined,
-            undefined,
-            'spu%',
-            expect.anything(),
-        );
+        for (const [input, expected] of [
+            ['spu', '%spu%'],
+            ['*spu*', '%spu%'],
+            ['spu*', 'spu%'],
+            ['book?', '%book_%'],
+            ['%spu%', '%spu%'],
+        ] as const) {
+            await service.describe({ database: 'sales', tableLike: input });
+            expect(adapter.describe).toHaveBeenLastCalledWith(
+                undefined,
+                undefined,
+                expected,
+                expect.anything(),
+            );
+        }
         await expect(
             service.describe({ database: 'sales', table: 'users', tableLike: 'spu%' }),
         ).rejects.toThrow('INVALID_REQUEST');

@@ -167,6 +167,12 @@ export class QueryService {
         };
     }
 
+    /** 规范化表名模糊模式：glob 星号转换为 SQL 通配符，不含通配符时按包含匹配。 */
+    private normalizeTableLike(pattern: string): string {
+        const translated = pattern.replace(/\*/g, '%').replace(/\?/g, '_');
+        return translated.includes('%') ? translated : `%${translated}%`;
+    }
+
     /** 使用绑定参数查询可见表结构；无精确表名时截断视为范围过宽，拒绝返回不完整结构。 */
     async describe(input: unknown): Promise<QueryResult> {
         const requestId = crypto.randomUUID();
@@ -183,8 +189,12 @@ export class QueryService {
         this.logger.info(LogEvent.SchemaReceived, { requestId, database: request.database });
         try {
             const source = await this.source(request.database);
+            const tableLike =
+                request.tableLike === undefined
+                    ? undefined
+                    : this.normalizeTableLike(request.tableLike);
             const result = await this.execute(source, this.limits, (adapter) =>
-                adapter.describe(request.schema, request.table, request.tableLike, this.limits),
+                adapter.describe(request.schema, request.table, tableLike, this.limits),
             );
             if (request.table && result.rowCount === 0) throw new SafeError(ErrorCode.NotFound);
             if (result.truncated && !request.table) throw new SafeError(ErrorCode.ResultTooLarge);
