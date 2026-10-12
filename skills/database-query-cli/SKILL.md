@@ -44,7 +44,7 @@ node "$cli" --help
 2. 执行 `describe --database <别名>`；已知表名时用 `--table <表名>`，否则用 `--table-like '片段'`（包含匹配，`*`、`%`、`?` 均可作为通配符）。不要无过滤整库 describe：结果被截断时命令返回 `RESULT_TOO_LARGE`，应改用过滤而不是重试。PostgreSQL 可指定 schema；SQLite 不传 schema，MySQL 不跨配置数据库查询。
 3. 根据实际结构编写最小必要 SELECT，优先明确列名、筛选条件和较小行数；不默认导出整表或读取密码、令牌等敏感列。
 4. SQL 和参数文件保存在当前任务专用目录，使用 UTF-8 无 BOM。业务值使用占位符绑定，不拼接用户输入。PostgreSQL 使用 `$1` 等占位符，MySQL/SQLite 使用 `?`。
-5. 调用 `query --database <别名> --sql-file <SQL文件> --max-rows <正整数>`；参数用 `--parameters-file <JSON文件>` 或内联 `--parameters '[1]'`。无参数时两者都省略；参数为字符串、有限数字、布尔值或 null 组成的 JSON 数组。内联参数会留在 shell 历史与进程列表中，敏感业务值仍用文件绑定。
+5. 调用 `query --database <别名> --sql-file <SQL文件> --max-rows <正整数>`；参数用 `--parameters-file <JSON文件>` 或内联 `--parameters '[1]'`，两者不可同时使用。无参数时两者都省略；参数为字符串、有限数字、布尔值或 null 组成的 JSON 数组。内联参数会留在 shell 历史与进程列表中，敏感业务值仍用文件绑定。
 6. SQL 从 stdin 读取时指定 `--sql-file -`；SQL 与参数文件不同时共用 stdin。
 7. 检查退出码、`rowCount` 和 `truncated`。结果截断时说明不完整，不把部分结果当作完整统计，也不自动调高限制或无限重试。
 
