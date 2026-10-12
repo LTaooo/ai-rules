@@ -13,13 +13,13 @@ import type { Parameter, RawResult } from '../../../domain/models/QueryResult.js
 export class PostgresAdapter implements DatabaseAdapter {
     private readonly clients = new Set<Client>();
     private closed = false;
-    /** 初始化依赖与资源状态，不在构造期间执行查询。 */
+    /** 保存数据源配置；连接按查询逐次建立并登记，以便超时与关闭时统一回收。 */
     constructor(private readonly config: DatabaseConfig) {}
 
     /** 执行参数绑定的只读查询；限制时间、行数与字节，结束后释放资源。 */
     async query(sql: string, parameters: Parameter[], limits: Limits): Promise<RawResult> {
         if (this.closed) throw new SafeError(ErrorCode.Closed);
-        // The read-only transaction is a database-enforced second barrier behind SQL policy validation.
+        // 只读事务是应用层 SQL 白名单之后、由数据库层面强制执行的第二道防线。
         const client = new pg.Client({
             host: this.config.host,
             port: this.config.port,

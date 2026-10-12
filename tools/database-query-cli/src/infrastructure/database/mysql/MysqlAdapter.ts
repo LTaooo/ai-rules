@@ -15,7 +15,7 @@ export class MysqlAdapter implements DatabaseAdapter {
     private readonly aborts = new Set<() => void>();
     private readonly transports = new Set<Socket>();
     private closed = false;
-    /** 初始化依赖与资源状态，不在构造期间执行查询。 */
+    /** 保存数据源配置；中止回调与底层 Socket 登记在集合中，以便超时时强制销毁。 */
     constructor(private readonly config: DatabaseConfig) {}
 
     /** 使用结构化配置建立单语句连接，保留底层 Socket 以支持强制取消。 */
@@ -66,7 +66,7 @@ export class MysqlAdapter implements DatabaseAdapter {
     /** 执行参数绑定的只读查询；限制时间、行数与字节，结束后释放资源。 */
     async query(sql: string, parameters: Parameter[], limits: Limits): Promise<RawResult> {
         if (this.closed) throw new SafeError(ErrorCode.Closed);
-        // mysql2's public destroy() may half-close; retain and destroy the underlying Socket explicitly.
+        // mysql2 的公开 destroy() 可能只做半关闭；必须显式销毁底层 Socket 才能真正断开。
         const { connection, transport } = this.connection(limits);
         this.transports.add(transport);
         const transportClosed = new Promise<void>((resolve) => {

@@ -38,7 +38,7 @@ CLI 目前是新增实现；使用前执行 `npm run check`，并用独立 SQLit
 
 - 子命令覆盖数据源列表、结构查询与只读业务查询，详见快速开始与 `--help`。
 - 通用 SQL 仅接受单条 SELECT、纯查询 WITH 和 UNION 等经过正向许可验证的语法。
-- 拒绝写入、删除、DDL、事务管理、多语句、注释、锁定查询、输出文件和未知函数。
+- 拒绝写入、删除、DDL、事务管理、多语句、注释、锁定查询、递归 CTE（WITH RECURSIVE）、输出文件和未知函数。
 - 使用 AST 递归校验、数据库只读保护和最小权限账户；不能识别的 SQL 不降级放行。
 - 默认最多返回 1000 行、10 秒执行时间、1 MiB 响应，每个数据源最多 4 个并发请求。
 - 数据源描述、地址、用户名和凭据目标名保存于凭据条目；远程数据库密码只存 Windows 凭据管理器，JSON 不含明文密码。不接入云凭据管理，不使用 `.agentsignore`。
@@ -99,11 +99,11 @@ node dist/cli.js init
 
 `query --database sales --sql-file ./query.sql --parameters-file ./parameters.json --max-rows 100`。
 
-PostgreSQL 使用 `$1`、`$2` 等占位符，MySQL 和 SQLite 使用 `?`。参数类型为字符串、有限数字、布尔值或 null。`--max-rows` 不能超过全局行数上限。
+PostgreSQL 使用 `$1`、`$2` 等占位符，MySQL 和 SQLite 使用 `?`。参数类型为字符串、有限数字、布尔值或 null。`--max-rows` 不能超过全局行数上限；`--parameters-file` 与 `--parameters` 不可同时使用。
 
 结果包含 `columns`、二维数组 `rows`、`rowCount`、`truncated`、`durationMs`。数组保留重复列名；大整数和精确小数以字符串返回；SQLite 整数统一为字符串。二进制输出为 `{ "type": "binary", "base64": "..." }`。PostgreSQL 驱动 Date 输出 ISO 字符串；MySQL 日期保留数据库返回的文本；不自动给无时区文本补时区。
 
-通用函数许可包含 COUNT、SUM、AVG、MIN、MAX、COALESCE、NULLIF、LOWER、UPPER、LENGTH、CHAR_LENGTH、ABS、ROUND、TRIM、LTRIM、RTRIM、SUBSTR、SUBSTRING、CONCAT；CAST 只允许内置类型。具体数据库不支持的函数会返回数据库错误，不自动改写方言。拒绝限定 schema 或以引号混淆的函数、窗口函数、用户定义函数、注释、反斜杠转义和 PostgreSQL dollar-quoted 字符串。字符串里普通的 DELETE 等关键字不会被误判。
+通用函数许可包含 COUNT、SUM、AVG、MIN、MAX、COALESCE、NULLIF、LOWER、UPPER、LENGTH、CHAR_LENGTH、ABS、ROUND、TRIM、LTRIM、RTRIM、SUBSTR、SUBSTRING、CONCAT；CAST 只允许内置类型。具体数据库不支持的函数会返回数据库错误，不自动改写方言。拒绝限定 schema 或以引号混淆的函数、窗口函数、用户定义函数、注释、反斜杠转义、PostgreSQL dollar-quoted 字符串和 WITH RECURSIVE。字符串里普通的 DELETE 等关键字不会被误判。
 
 行数只省略完整行，超大字段返回错误而非截断字段。限额以规范化结果的字节数计。限额不能替代数据库自身内存、CPU、网络和可见数据范围控制。
 

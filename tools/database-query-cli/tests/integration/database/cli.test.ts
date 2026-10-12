@@ -66,6 +66,28 @@ it('runs compiled CLI list, describe, count and rejects writes against injected 
         );
         expect(conflicting.status).toBe(1);
         expect(conflicting.stderr.trim()).toBe('INVALID_REQUEST');
+        const conflictingWithSql = run(
+            [
+                'query',
+                '--database',
+                'local',
+                '--sql-file',
+                '-',
+                '--parameters',
+                '[1]',
+                '--parameters-file',
+                'p.json',
+            ],
+            'SELECT 1',
+        );
+        expect(conflictingWithSql.status).toBe(1);
+        expect(conflictingWithSql.stderr.trim()).toBe('INVALID_REQUEST');
+        const bothStdin = run(
+            ['query', '--database', 'local', '--sql-file', '-', '--parameters-file', '-'],
+            'SELECT 1',
+        );
+        expect(bothStdin.status).toBe(1);
+        expect(bothStdin.stderr.trim()).toBe('INVALID_REQUEST');
     } finally {
         rmSync(folder, { recursive: true, force: true });
     }

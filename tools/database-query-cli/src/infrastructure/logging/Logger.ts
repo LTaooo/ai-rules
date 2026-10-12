@@ -5,7 +5,7 @@ export type LogFields = Record<string, boolean | number | string | undefined>;
 export type LogSink = (line: string) => void;
 
 export class Logger {
-    /** 初始化依赖与资源状态，不在构造期间执行查询。 */
+    /** 保存注入的日志接收器；未注入时默认写进程 stderr。 */
     constructor(private readonly sink: LogSink = (line) => process.stderr.write(line)) {}
 
     /** 记录信息级事件，仅向注入的安全日志接收器写入。 */

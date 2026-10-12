@@ -56,7 +56,7 @@ export class QueryService {
     private readonly active = new Map<string, number>();
     private closed = false;
     private closing: Promise<void> | undefined;
-    /** 初始化依赖与资源状态，不在构造期间执行查询；数据源来自凭据管理器注册表。 */
+    /** 组装数据源注册表、适配器工厂与日志器；连接在首次查询时才建立。 */
     constructor(
         private readonly registry: SourceRegistry,
         private readonly limits: Limits = SourceSchema.defaultLimits,

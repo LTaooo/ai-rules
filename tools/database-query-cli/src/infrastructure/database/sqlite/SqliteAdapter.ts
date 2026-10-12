@@ -11,14 +11,14 @@ import type { Parameter, RawResult } from '../../../domain/models/QueryResult.js
 export class SqliteAdapter implements DatabaseAdapter {
     private readonly children = new Set<ChildProcess>();
     private closed = false;
-    /** 初始化依赖与资源状态，不在构造期间执行查询。 */
+    /** 保存数据源配置；查询子进程逐次创建并登记，以便超时与关闭时统一回收。 */
     constructor(private readonly config: DatabaseConfig) {}
 
     /** 执行参数绑定的只读查询；限制时间、行数与字节，结束后释放资源。 */
     async query(sql: string, parameters: Parameter[], limits: Limits): Promise<RawResult> {
         if (this.closed) throw new SafeError(ErrorCode.Closed);
         return new Promise((resolve, reject) => {
-            // A separate process is required because a native SQLite call may not yield to worker termination promptly.
+            // 原生 SQLite 调用可能无法及时响应终止信号，因此查询必须在独立子进程中执行。
             const child = fork(
                 new URL(
                     import.meta.url.endsWith('.ts')

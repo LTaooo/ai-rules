@@ -171,7 +171,9 @@ export class DatabaseCli {
             options.schema ||
             options.table ||
             options.tableLike ||
-            (!options.sqlFile && options.parametersFile)
+            (options.parametersFile !== undefined && options.parameters !== undefined) ||
+            (!options.sqlFile && options.parametersFile) ||
+            (options.sqlFile === '-' && options.parametersFile === '-')
         )
             throw new SafeError(ErrorCode.InvalidRequest);
     }
@@ -268,7 +270,7 @@ export class DatabaseCli {
             '  database-query init',
             'show prints source identification only; host, port and user are not shown.',
             'init runs an interactive wizard that creates or replaces a data source; it requires a TTY.',
-            'SQL defaults to stdin; parameters must be a JSON array from a file or --parameters.',
+            'SQL defaults to stdin; parameters must be a JSON array from a file or --parameters (not both).',
             '--table-like does a contains match on table names; % and _ are SQL wildcards, * is translated to %.',
             'Values passed via --parameters appear on the command line; prefer files for sensitive values.',
             'Optional --diagnose adds only a safe MySQL stage and allowlisted error code to stderr.',

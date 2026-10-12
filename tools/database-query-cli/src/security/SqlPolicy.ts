@@ -51,6 +51,10 @@ const types = new Set([
     'DESC',
     'DISTINCT',
 ]);
+/**
+ * AST 键白名单，与 package.json 精确锁定的 node-sql-parser 版本输出一一对应。
+ * 升级解析器视为安全事件：未列入的新键默认拒绝，逐键重审本清单并同步安全测试后方可加入。
+ */
 const keys = new Set([
     'type',
     'with',
@@ -86,7 +90,6 @@ const keys = new Set([
     'tableList',
     'columnList',
     'stmt',
-    'recursive',
     'join',
     'on',
     'using',
@@ -153,7 +156,7 @@ const castTypes = new Set([
     'UNSIGNED',
 ]);
 
-// This is a positive allowlist: parser nodes and functions not listed here are rejected.
+// 正向白名单：解析器节点与函数不在清单内的一律拒绝。
 
 export class SqlPolicy {
     /** 终止不可信 SQL 的验证，仅抛出不包含 SQL 的安全错误。 */
@@ -175,7 +178,7 @@ export class SqlPolicy {
         let ended = false;
         for (let index = 0; index < sql.length; index++) {
             const character = sql[index]!;
-            // Backslash and comments have dialect-specific escape rules; rejecting them avoids parser ambiguity.
+            // 反斜杠与注释在各方言中有不同的转义规则，直接拒绝以消除解析歧义。
             if (character === '\\' || character === '\0') SqlPolicy.reject();
             if (quote) {
                 if (character === quote) {

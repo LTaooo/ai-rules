@@ -3,7 +3,7 @@ import type { DatabaseStage } from '../../domain/enums/DatabaseStage.js';
 import { ErrorCode } from '../../domain/enums/ErrorCode.js';
 
 export class SafeError extends Error {
-    /** 初始化依赖与资源状态，不在构造期间执行查询。 */
+    /** 以错误码作为消息主体初始化，异常文本不携带任何上下文细节。 */
     constructor(public readonly code: ErrorCode) {
         super(code);
         this.name = 'SafeError';

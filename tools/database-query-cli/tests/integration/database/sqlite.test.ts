@@ -100,10 +100,16 @@ describe('real SQLite read-only adapter', () => {
     });
 
     it('terminates expensive work and remains usable', async () => {
-        const { source, limits } = fixture();
+        const { source, limits, filename } = fixture();
+        const setup = new DatabaseSync(filename);
+        setup.exec('CREATE TABLE seq (v INTEGER NOT NULL);');
+        setup.exec(
+            'INSERT INTO seq WITH RECURSIVE sequence(v) AS (SELECT 1 UNION ALL SELECT v + 1 FROM sequence WHERE v < 100000) SELECT v FROM sequence;',
+        );
+        setup.close();
         const adapter = new SqliteAdapter(source);
-        const expensive =
-            'WITH RECURSIVE sequence(value) AS (SELECT 1 UNION ALL SELECT value + 1 FROM sequence WHERE value < 100000000) SELECT SUM(value) FROM sequence';
+        // setup 中的递归 CTE 不经过 SqlPolicy；业务查询侧改用大表交叉连接制造等价负载
+        const expensive = 'SELECT COUNT(*) FROM seq a, seq b WHERE a.v + b.v > 0';
         await expect(adapter.query(expensive, [], { ...limits, timeoutMs: 200 })).rejects.toThrow(
             'TIMEOUT',
         );

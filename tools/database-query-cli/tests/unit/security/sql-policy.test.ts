@@ -46,6 +46,7 @@ describe('SQL policy', () => {
             'SELECT * INTO copied FROM users',
             "SELECT * FROM users INTO OUTFILE '/tmp/stolen'",
             'WITH changed AS (DELETE FROM users RETURNING *) SELECT * FROM changed',
+            'WITH RECURSIVE t AS (SELECT 1) SELECT * FROM t',
             'PRAGMA query_only = OFF',
             "ATTACH DATABASE 'other.db' AS other",
             'VACUUM',
