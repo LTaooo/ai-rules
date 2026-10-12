@@ -150,17 +150,14 @@ export class QueryService {
         }
     }
 
-    /** 返回除密码外的完整数据源信息，供人工核对接线。 */
+    /** 返回数据源的业务标识与 TLS 配置，不包含主机、端口、用户名等侦察信息。 */
     async showSource(name: string): Promise<Record<string, unknown>> {
         const source = await this.source(name);
         return {
             name: source.name,
             type: source.type,
             description: source.description,
-            host: source.host,
-            port: source.port,
             database: source.database,
-            username: source.username,
             filename: source.filename,
             sslMode: source.sslMode,
             tls: source.tls,

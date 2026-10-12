@@ -263,7 +263,7 @@ export class DatabaseCli {
             '  database-query query --database NAME [--sql-file FILE|-] [--parameters-file FILE|--parameters JSON] [--max-rows N]',
             '  database-query init',
             'Sources live in Windows Credential Manager (one credential per database, target prefix database-query.).',
-            'show prints connection details without the password.',
+            'show prints source identification only; host, port and user are not shown.',
             'init runs an interactive wizard that creates or replaces such a credential; it requires a TTY.',
             'SQL defaults to stdin; parameters must be a JSON array from a file or --parameters.',
             '--table-like does a contains match on table names; % and _ are SQL wildcards, * is translated to %.',

@@ -151,19 +151,19 @@ describe('query service', () => {
         expect(withTable.truncated).toBe(true);
     });
 
-    it('shows full connection details except the password', async () => {
+    it('shows source identification without reconnaissance details', async () => {
         const { service } = setup();
         const shown = await service.showSource('sales');
         expect(shown).toEqual({
             name: 'sales',
             type: 'postgres',
             description: 'Synthetic fixture',
-            host: 'localhost',
-            port: 5432,
             database: 'sales',
-            username: 'reader',
         });
-        expect(JSON.stringify(shown)).not.toContain('supersecret');
+        const serialized = JSON.stringify(shown);
+        expect(serialized).not.toContain('supersecret');
+        expect(serialized).not.toContain('localhost');
+        expect(serialized).not.toContain('reader');
     });
 
     it('rejects writes before calling the driver', async () => {

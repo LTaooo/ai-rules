@@ -1,0 +1,12 @@
+#!/usr/bin/env sh
+set -e
+changed=$(git diff --cached --name-only -- tools/ | cut -d/ -f2 | sort -u)
+for project in $changed; do
+    [ -f "tools/$project/package.json" ] || continue
+    echo "==> pre-commit checks: tools/$project"
+    (
+        cd "tools/$project"
+        npx --no-install lint-staged
+        npm run typecheck
+    )
+done

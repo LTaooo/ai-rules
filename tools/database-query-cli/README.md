@@ -24,7 +24,7 @@ node $cli query --database local --sql-file ./query.sql --parameters-file ./para
 
 SQL 默认从标准输入读取；参数化查询使用 `--sql-file`，若 SQL 来自标准输入则显式指定 `--sql-file -`，参数 JSON 使用独立文件，不同时从 stdin 读取两份输入。当前没有 `--sql`、`--format` 或 CSV 输出选项；具体参数通过顶层 `--help` 查询。
 
-- `list` 返回数据库别名、类型和公开描述；`show --database <别名>` 返回除密码外的完整连接信息（主机、端口、用户名等）。
+- `list` 返回数据库别名、类型和公开描述；`show --database <别名>` 只返回业务标识（类型、描述、库名）与 TLS 模式，不返回主机、端口、用户名或密码——主机与用户名属于侦察信息，完整接线由用户通过 `cmdkey /list:database-query.<别名>` 查看。
 - `describe` 返回可见列信息，支持精确 `--table` 或模糊 `--table-like`（`%` 通配）；无过滤且结果被截断时返回 `RESULT_TOO_LARGE`，应改用过滤。`query` 返回 `columns`、`rows`、`rowCount`、`truncated`、`durationMs`。
 - CLI 成功结果为 stdout JSON；帮助为文本。常规失败在 stderr 输出安全错误码，退出码为 1，成功为 0。CLI 当前关闭请求日志，MCP 日志行为见下文。
 - 显式增加 `--diagnose` 时，MySQL 失败会额外在 stderr 输出固定执行阶段和白名单错误码；不输出驱动原始消息、连接地址、凭证、SQL 或参数。`CONNECT` 表示连接尚未建立，`UNKNOWN` 表示错误码不在公开白名单内，不能据此推断具体原因。
@@ -173,13 +173,11 @@ PostgreSQL 使用 `$1`、`$2` 等占位符，MySQL 和 SQLite 使用 `?`。参�
 | BUSY               | 数据源并发达到上限，稍后重试         |
 | CLOSED             | 服务正在关闭或已关闭                 |
 
-## 每次提交自动检查
+## 提交检查与 CI
 
-Husky pre-commit 先对暂存文件执行 Prettier 和 ESLint，再对整个工作区执行 TypeScript 类型检查。任一步失败均拒绝正常提交。lint-staged 保留部分暂存文件的未暂存修改，不会 git add 整个项目。
+提交钩子位于仓库根 `.githooks/pre-commit`，由 `core.hooksPath` 启用：暂存改动触及 `tools/database-query-cli/` 时，先在本项目内运行 lint-staged（暂存文件 Prettier 与 ESLint，保留部分暂存恢复）再运行 TypeScript 类型检查；仅改动仓库根级规则与文档时直接放行。开发环境执行 `npm ci` 或 `npm run prepare` 自动启用；`HUSKY=0`、生产环境或省略开发依赖时跳过；`--no-verify` 可临时绕过。
 
-开发环境可通过 `npm run prepare` 安装本地 Git 钩子；此命令不创建提交。
-
-以后普通开发环境的 `npm ci` 自动安装钩子。生产环境、忽略开发依赖或 `HUSKY=0` 时跳过钩子安装，避免要求生产服务安装 Husky。`HUSKY=0` 或 `--no-verify` 可绕过本地钩子；远程仓库应设置 CI 为合并必需检查。包含 GitHub Actions 的 Windows、Linux 检查配置，但尚未在远程平台运行。
+CI 配置位于仓库根 `.github/workflows/ci.yml`，push 与 pull request 触发，在 Windows 与 Linux 双平台于本项目内执行 `npm ci` 与 `npm run check`，作为钩子的远程兜底。
 
 ```powershell
 npm run format

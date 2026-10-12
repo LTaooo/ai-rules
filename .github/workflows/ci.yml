@@ -10,6 +10,9 @@ jobs:
             matrix:
                 os: [ubuntu-latest, windows-latest]
         runs-on: ${{ matrix.os }}
+        defaults:
+            run:
+                working-directory: tools/database-query-cli
         env:
             HUSKY: '0'
         steps:
@@ -20,5 +23,6 @@ jobs:
               with:
                   node-version: '24'
                   cache: npm
+                  cache-dependency-path: tools/database-query-cli/package-lock.json
             - run: npm ci
             - run: npm run check
