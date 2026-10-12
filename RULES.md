@@ -36,6 +36,7 @@
 ## Git
 
 - 未经明确要求，不执行 `git commit`。
+- `git add` 只加显式列出的路径，不用 `-A`/`-.`；提交前核对暂存清单，防止调试产物与无关文件混入。
 - 提交前自查暂存内容，任何仓库不得提交敏感信息：凭据、令牌、密钥、真实数据库配置、连接字符串、日志、备份文件和含本机用户名或主机名的路径；发现敏感信息先移除或补充忽略规则，不确定时先询问。
 - 重构前先用 `git log --oneline` 和 `git blame` 了解文件历史。
 - Bash 会话中 `HOME` 可能被设为 WSL 风格路径（如 `/mnt/c/<用户名>`），git 与 ssh 按该路径查找 `~/.gitconfig`、`~/.ssh/known_hosts` 均落空：commit 报 `Author identity unknown`，fetch/push 报 `Host key verification failed`。遇到这两类报错先用 `echo $HOME` 检查，命令加前缀 `HOME=/c/Users/<用户名>` 修复，不要因此改写 git config 或 ssh 配置。
