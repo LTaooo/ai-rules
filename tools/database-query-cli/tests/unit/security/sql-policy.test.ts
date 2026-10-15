@@ -9,6 +9,7 @@ describe('SQL policy', () => {
             "SELECT 'DELETE; DROP TABLE users -- /* */' AS text",
             'SELECT id FROM users WHERE id = 1 ORDER BY id LIMIT 3;',
             'SELECT COUNT(*) FROM users',
+            'SELECT status, COUNT(*) FROM orders GROUP BY status HAVING COUNT(*) > 1',
             'SELECT DISTINCT id FROM users',
             'SELECT COUNT(DISTINCT id) FROM users',
             'SELECT CASE WHEN id = 1 THEN 2 ELSE 3 END FROM users',
@@ -90,5 +91,20 @@ describe('SQL policy', () => {
         expect(
             SqlPolicy.validateSql('SELECT CAST(id AS TEXT) FROM users', Dialect.SQLite),
         ).toBeTruthy();
+    });
+
+    it('rejects the mysql group by modifier while allowing plain group by', () => {
+        expect(
+            SqlPolicy.validateSql(
+                'SELECT status, COUNT(*) FROM orders GROUP BY status',
+                Dialect.MySQL,
+            ),
+        ).toBeTruthy();
+        expect(() =>
+            SqlPolicy.validateSql(
+                'SELECT status, COUNT(*) FROM orders GROUP BY status WITH ROLLUP',
+                Dialect.MySQL,
+            ),
+        ).toThrow();
     });
 });

@@ -98,6 +98,9 @@ const keys = new Set([
     'nulls',
     'prefix',
     'members',
+    // MySQL 方言的 groupby 节点固定携带 modifiers 键，无子句修饰时为 [null]；
+    // 非 null 值是 WITH ROLLUP 的 origin 节点，仍被 origin 白名单规则拒绝。
+    'modifiers',
     'quoted',
     'keyword',
     'symbol',
