@@ -15,7 +15,6 @@ const functions = new Set([
     'LOWER',
     'UPPER',
     'LENGTH',
-    'CHAR_LENGTH',
     'ABS',
     'ROUND',
     'TRIM',
@@ -24,6 +23,14 @@ const functions = new Set([
     'SUBSTR',
     'SUBSTRING',
     'CONCAT',
+    // EXISTS 解析为函数节点，参数必须是子查询；NOT EXISTS 则是 unary_expr 的操作符。
+    'EXISTS',
+]);
+// 方言扩展函数：DATE_FORMAT 仅 MySQL 提供，CHAR_LENGTH 在 SQLite 不存在。
+const dialectFunctions = new Map<Dialect, ReadonlySet<string>>([
+    [Dialect.MySQL, new Set([...functions, 'CHAR_LENGTH', 'DATE_FORMAT'])],
+    [Dialect.PostgreSQL, new Set([...functions, 'CHAR_LENGTH'])],
+    [Dialect.SQLite, functions],
 ]);
 const types = new Set([
     'select',
@@ -136,6 +143,7 @@ const operators = new Set([
     'NOT LIKE',
     'BETWEEN',
     'NOT BETWEEN',
+    'NOT EXISTS',
     '||',
 ]);
 const castTypes = new Set([
@@ -171,6 +179,22 @@ export class SqlPolicy {
         if (value === null || typeof value !== 'object' || Array.isArray(value))
             return SqlPolicy.reject();
         return value as Record<string, unknown>;
+    }
+
+    /** 要求节点是携带 SELECT AST 的子查询。 */
+    private static requireSubquery(value: unknown): void {
+        const subquery = SqlPolicy.record(value);
+        if (!('ast' in subquery)) return SqlPolicy.reject();
+        if (SqlPolicy.record(subquery.ast).type !== 'select') return SqlPolicy.reject();
+    }
+
+    /** 要求 EXISTS 的参数是恰好一个子查询。 */
+    private static requireExistsSubquery(args: unknown): void {
+        const list = SqlPolicy.record(args);
+        if (list.type !== 'expr_list') return SqlPolicy.reject();
+        const values = list.value;
+        if (!Array.isArray(values) || values.length !== 1) return SqlPolicy.reject();
+        SqlPolicy.requireSubquery(values[0]);
     }
 
     /** 拒绝注释、反斜杠、异常引号、多语句和过深括号，消除方言解析歧义。 */
@@ -236,6 +260,8 @@ export class SqlPolicy {
                     !['NOT', '+', '-'].includes(String(node.operator).toUpperCase())))
         )
             SqlPolicy.reject();
+        if (typeof node.operator === 'string' && node.operator.toUpperCase() === 'NOT EXISTS')
+            SqlPolicy.requireSubquery(node.expr);
         if (
             node.join !== undefined &&
             ![
@@ -282,7 +308,10 @@ export class SqlPolicy {
                 if (part.type !== 'default') SqlPolicy.reject();
                 name = part.value;
             }
-            if (typeof name !== 'string' || !functions.has(name.toUpperCase())) SqlPolicy.reject();
+            if (typeof name !== 'string') return SqlPolicy.reject();
+            const upper = name.toUpperCase();
+            if (!dialectFunctions.get(dialect)?.has(upper)) SqlPolicy.reject();
+            if (upper === 'EXISTS') SqlPolicy.requireExistsSubquery(node.args);
         }
         if (node.dataType !== undefined && !castTypes.has(String(node.dataType).toUpperCase()))
             SqlPolicy.reject();

@@ -103,7 +103,7 @@ PostgreSQL 使用 `$1`、`$2` 等占位符，MySQL 和 SQLite 使用 `?`。参�
 
 结果包含 `columns`、二维数组 `rows`、`rowCount`、`truncated`、`durationMs`。数组保留重复列名；大整数和精确小数以字符串返回；SQLite 整数统一为字符串。二进制输出为 `{ "type": "binary", "base64": "..." }`。PostgreSQL 驱动 Date 输出 ISO 字符串；MySQL 日期保留数据库返回的文本；不自动给无时区文本补时区。
 
-通用函数许可包含 COUNT、SUM、AVG、MIN、MAX、COALESCE、NULLIF、LOWER、UPPER、LENGTH、CHAR_LENGTH、ABS、ROUND、TRIM、LTRIM、RTRIM、SUBSTR、SUBSTRING、CONCAT；CAST 只允许内置类型。具体数据库不支持的函数会返回数据库错误，不自动改写方言。拒绝限定 schema 或以引号混淆的函数、窗口函数、用户定义函数、注释、反斜杠转义、PostgreSQL dollar-quoted 字符串和 WITH RECURSIVE。字符串里普通的 DELETE 等关键字不会被误判。
+函数许可按方言区分：COUNT、SUM、AVG、MIN、MAX、COALESCE、NULLIF、LOWER、UPPER、LENGTH、ABS、ROUND、TRIM、LTRIM、RTRIM、SUBSTR、SUBSTRING、CONCAT 三种方言通用；CHAR_LENGTH 仅 MySQL 与 PostgreSQL，DATE_FORMAT 仅 MySQL。EXISTS 与 NOT EXISTS 的参数必须是子查询，经同一白名单递归校验后放行。其余函数、窗口函数、用户定义函数，以及限定 schema 或带引号的函数一律拒绝，不自动改写方言。CAST 只允许内置类型。拒绝注释、反斜杠转义、PostgreSQL dollar-quoted 字符串和 WITH RECURSIVE；字符串里普通的 DELETE 等关键字不会被误判。
 
 行数只省略完整行，超大字段返回错误而非截断字段。限额以规范化结果的字节数计。限额不能替代数据库自身内存、CPU、网络和可见数据范围控制。
 

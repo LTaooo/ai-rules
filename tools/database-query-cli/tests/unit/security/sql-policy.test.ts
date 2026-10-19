@@ -18,6 +18,8 @@ describe('SQL policy', () => {
             'SELECT id FROM users UNION ALL SELECT id FROM archived',
             'SELECT a.id FROM users a JOIN teams b ON a.team_id = b.id',
             'SELECT id FROM users WHERE id IN (SELECT user_id FROM teams)',
+            'SELECT id FROM users WHERE EXISTS (SELECT 1 FROM teams WHERE teams.id = users.id)',
+            'SELECT id FROM users WHERE NOT EXISTS (SELECT 1 FROM teams WHERE teams.id = users.id)',
         ])(`allows ${dialect}: %s`, (sql) => {
             expect(SqlPolicy.validateSql(sql, dialect)).toBeTruthy();
         });
@@ -41,6 +43,9 @@ describe('SQL policy', () => {
             "SELECT pg_read_file('/etc/passwd')",
             'SELECT malicious_function(id) FROM users',
             'SELECT ABS(malicious_function(id)) FROM users',
+            'SELECT 1 FROM users WHERE EXISTS(id)',
+            "SELECT 1 FROM users WHERE EXISTS(name LIKE 'a%')",
+            'SELECT 1 FROM users WHERE NOT EXISTS(123)',
             'SELECT pg_catalog.lower(name) FROM users',
             'SELECT * FROM users FOR UPDATE',
             'SELECT * FROM users FOR SHARE',
@@ -106,5 +111,50 @@ describe('SQL policy', () => {
                 Dialect.MySQL,
             ),
         ).toThrow();
+    });
+
+    it('rejects functions outside the dialect allowlist', () => {
+        expect(
+            SqlPolicy.validateSql(
+                "SELECT DATE_FORMAT(created_at,'%Y-%m') FROM orders",
+                Dialect.MySQL,
+            ),
+        ).toBeTruthy();
+        expect(() =>
+            SqlPolicy.validateSql(
+                "SELECT DATE_FORMAT(created_at,'%Y-%m') FROM orders",
+                Dialect.PostgreSQL,
+            ),
+        ).toThrow();
+        expect(() =>
+            SqlPolicy.validateSql(
+                "SELECT DATE_FORMAT(created_at,'%Y-%m') FROM orders",
+                Dialect.SQLite,
+            ),
+        ).toThrow();
+        expect(
+            SqlPolicy.validateSql('SELECT CHAR_LENGTH(name) FROM users', Dialect.MySQL),
+        ).toBeTruthy();
+        expect(
+            SqlPolicy.validateSql('SELECT CHAR_LENGTH(name) FROM users', Dialect.PostgreSQL),
+        ).toBeTruthy();
+        expect(() =>
+            SqlPolicy.validateSql('SELECT CHAR_LENGTH(name) FROM users', Dialect.SQLite),
+        ).toThrow();
+    });
+
+    it('allows mysql date grouping and correlated exists subqueries', () => {
+        expect(
+            SqlPolicy.validateSql(
+                "SELECT DATE_FORMAT(o.created_at,'%Y-%m') AS ym, COUNT(*) AS cnt FROM orders o WHERE o.status=3 AND o.updated_by<>'System' AND o.created_at>'2026-03-01' GROUP BY ym ORDER BY ym",
+                Dialect.MySQL,
+            ),
+        ).toBeTruthy();
+        expect(
+            SqlPolicy.validateSql(
+                "SELECT o.id AS order_id, o.customer_id, o.created_at FROM orders o WHERE o.status=3 AND o.updated_by<>'System' AND EXISTS (SELECT 1 FROM order_items i WHERE i.order_id=o.id AND i.deleted=0 AND i.product_id IS NOT NULL AND i.product_id<>'') AND NOT EXISTS (SELECT 1 FROM shipments s WHERE s.order_id=o.id)",
+                Dialect.MySQL,
+            ),
+        ).toBeTruthy();
     });
 });
