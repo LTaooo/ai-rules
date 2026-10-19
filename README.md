@@ -20,10 +20,10 @@
 
 ## 接入与技能发现
 
-- `~/.codex/AGENTS.md` 和 `~/.claude/CLAUDE.md` 是指向 `~/ai-rule/RULES.md` 的符号链接，由同步脚本维护；两个工具原生读取完整规则正文，入口不含内容副本。
+- `~/.codex/AGENTS.md`、`~/.claude/CLAUDE.md` 和 `~/.agents/AGENTS.md` 是指向 `~/ai-rule/RULES.md` 的符号链接，由同步脚本维护；读取这些入口的工具原生加载完整规则正文，入口不含内容副本。
 - 创建符号链接需要管理员权限或已开启 Windows 开发者模式；同步脚本在当前会话无权限时自动弹出管理员授权（UAC）重跑，已开启开发者模式时静默直过。
 - 用 `/context` 或 `/memory` 可验证全局规则是否已加载。
-- `~/.agents/AGENTS.md` 仅保留兼容入口，不保存全局约束正文副本。
+- `~/.agents/AGENTS.md` 供读取用户级 `AGENTS.md` 的工具（如 DeepSeek Harness）使用，与其他入口指向同一份规则正文，不再保留单独的兼容说明。
 - 自定义技能正文唯一存放在 `~/ai-rule/skills/<技能名>/SKILL.md`，由同步脚本以目录联接接入 `~/.claude/skills/` 和 `~/.codex/skills/`；外部安装技能存放在 `~/.agents/skills/<技能名>/SKILL.md`。
 - 任务开始时按第三方技能的 frontmatter 描述检查命中（支持原生技能发现的工具会自动列出自定义技能），命中后读取对应目录中的正文。
 - 第三方技能目录和 `~/.agents/.skill-lock.json` 不纳入本仓库，不手动覆盖安装器维护的数据。
@@ -42,8 +42,8 @@
 pwsh -NoProfile -ExecutionPolicy Bypass -File "$HOME/ai-rule/sync.ps1"
 ```
 
-脚本将 `~/.codex/AGENTS.md` 和 `~/.claude/CLAUDE.md` 维护为指向 `~/ai-rule/RULES.md` 的符号链接，并为 `~/ai-rule/skills/` 下每个包含 `SKILL.md` 的技能在 `~/.claude/skills/` 和 `~/.codex/skills/` 中维护目录联接。映射已正确时跳过；入口为真实文件或映射指向其他位置时，备份后替换为正确映射；符号链接创建失败时恢复原文件。仅当入口映射待更新且当前会话无权限创建符号链接时，脚本自动弹出管理员授权（UAC）并重跑；已开启开发者模式或入口无需改动时静默直过。联接指向其他位置时自动重建；目标为真实目录或文件时跳过并警告；工具技能目录本身为联接时拒绝维护。
+脚本将 `~/.codex/AGENTS.md`、`~/.claude/CLAUDE.md` 和 `~/.agents/AGENTS.md` 维护为指向 `~/ai-rule/RULES.md` 的符号链接，并为 `~/ai-rule/skills/` 下每个包含 `SKILL.md` 的技能在 `~/.claude/skills/` 和 `~/.codex/skills/` 中维护目录联接。映射已正确时跳过；入口为真实文件或映射指向其他位置时，备份后替换为正确映射；符号链接创建失败时恢复原文件。仅当入口映射待更新且当前会话无权限创建符号链接时，脚本自动弹出管理员授权（UAC）并重跑；已开启开发者模式或入口无需改动时静默直过。联接指向其他位置时自动重建；目标为真实目录或文件时跳过并警告；工具技能目录本身为联接时拒绝维护。
 
-被替换的旧入口文件备份到 `.sync-backups/<时间与唯一标识>/`，备份文件名分别为 `codex-AGENTS.md` 和 `claude-CLAUDE.md`，需要恢复时复制回对应目标；备份失败不覆盖。备份目录已被 Git 忽略。同步不合并旧入口中的附加内容，不修改其他设置、项目入口或 `~/.agents/AGENTS.md`，不自动执行 Git 操作。
+被替换的旧入口文件备份到 `.sync-backups/<时间与唯一标识>/`，备份文件名分别为 `codex-AGENTS.md`、`claude-CLAUDE.md` 和 `agents-AGENTS.md`，需要恢复时复制回对应目标；备份失败不覆盖。备份目录已被 Git 忽略。同步不合并旧入口中的附加内容，不修改其他设置或项目入口，不自动执行 Git 操作。
 
 入口的父目录为目录联接或符号链接，或入口本身是目录时，脚本拒绝处理。脚本支持 `-UserHome` 指定隔离用户目录进行验证，默认使用当前用户主目录。

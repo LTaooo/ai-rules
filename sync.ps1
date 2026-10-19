@@ -206,7 +206,8 @@ try {
 
     $entryTargets = @(
         @{ RelativePath = '.codex/AGENTS.md'; BackupName = 'codex-AGENTS.md' },
-        @{ RelativePath = '.claude/CLAUDE.md'; BackupName = 'claude-CLAUDE.md' }
+        @{ RelativePath = '.claude/CLAUDE.md'; BackupName = 'claude-CLAUDE.md' },
+        @{ RelativePath = '.agents/AGENTS.md'; BackupName = 'agents-AGENTS.md' }
     )
 
     $entryWorkPending = $false
