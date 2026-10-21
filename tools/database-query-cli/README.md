@@ -37,9 +37,9 @@ CLI 目前是新增实现；使用前执行 `npm run check`，并用独立 SQLit
 ## 能力与边界
 
 - 子命令覆盖数据源列表、结构查询与只读业务查询，详见快速开始与 `--help`。
-- 通用 SQL 仅接受单条 SELECT、纯查询 WITH 和 UNION 等经过正向许可验证的语法。
-- 拒绝写入、删除、DDL、事务管理、多语句、注释、锁定查询、递归 CTE（WITH RECURSIVE）、输出文件和未知函数。
-- 使用 AST 递归校验、数据库只读保护和最小权限账户；不能识别的 SQL 不降级放行。
+- 通用 SQL 仅接受单条 SELECT 与纯查询 WITH、UNION 组合；函数、操作符、窗口等其余语法不设许可清单。
+- 拒绝写入、删除、DDL、事务管理、多语句、注释、锁定读取（FOR UPDATE、LOCK IN SHARE MODE）、递归 CTE（WITH RECURSIVE）、输出文件、会话变量赋值和危险函数（文件读取、休眠、加锁、后端控制、序列推进、扩展加载、dblink）。
+- 使用词法检查、SELECT 语句类型白名单与危险黑名单校验，配合数据库只读保护和最小权限账户；可解析的未知语法交给数据库解释，由只读层兜底，解析不了的语法返回 `SQL_REJECTED`。
 - 默认最多返回 1000 行、10 秒执行时间、1 MiB 响应，每个数据源最多 4 个并发请求。
 - 数据源描述、地址、用户名和凭据目标名保存于凭据条目；远程数据库密码只存 Windows 凭据管理器，JSON 不含明文密码。不接入云凭据管理，不使用 `.agentsignore`。
 - 运行日志使用 JSON Lines 写入 stderr，记录启动、停止、请求状态、耗时、行数、截断标识和安全错误码；不记录 SQL、参数、连接串、凭证或查询数据。
@@ -103,7 +103,7 @@ PostgreSQL 使用 `$1`、`$2` 等占位符，MySQL 和 SQLite 使用 `?`。参�
 
 结果包含 `columns`、二维数组 `rows`、`rowCount`、`truncated`、`durationMs`。数组保留重复列名；大整数和精确小数以字符串返回；SQLite 整数统一为字符串。二进制输出为 `{ "type": "binary", "base64": "..." }`。PostgreSQL 驱动 Date 输出 ISO 字符串；MySQL 日期保留数据库返回的文本；不自动给无时区文本补时区。
 
-函数许可按方言区分：COUNT、SUM、AVG、MIN、MAX、COALESCE、NULLIF、LOWER、UPPER、LENGTH、ABS、ROUND、TRIM、LTRIM、RTRIM、SUBSTR、SUBSTRING、CONCAT 三种方言通用；CHAR_LENGTH 仅 MySQL 与 PostgreSQL，DATE_FORMAT 仅 MySQL。EXISTS 与 NOT EXISTS 的参数必须是子查询，经同一白名单递归校验后放行。其余函数、窗口函数、用户定义函数，以及限定 schema 或带引号的函数一律拒绝，不自动改写方言。CAST 只允许内置类型。拒绝注释、反斜杠转义、PostgreSQL dollar-quoted 字符串和 WITH RECURSIVE；字符串里普通的 DELETE 等关键字不会被误判。
+函数不设许可清单：黑名单按最终函数名匹配（限定名与带引号名取最后一段），拒绝文件与服务器状态读取（LOAD_FILE、PG_READ_FILE、PG_LS_DIR、LO_IMPORT、LO_EXPORT 等）、休眠消耗（SLEEP、BENCHMARK、PG_SLEEP 等）、锁操作（GET_LOCK、PG_ADVISORY_LOCK 等）、后端控制（PG_TERMINATE_BACKEND、PG_CANCEL_BACKEND 等）、序列推进（NEXTVAL、SETVAL）、扩展加载（LOAD_EXTENSION）与跨库通道（DBLINK）。其余函数——方言专属（如 DATE_FORMAT）、窗口函数、标量子查询、用户定义函数与任意限定名——放行；数据库不存在的函数在执行时报数据库错误，不自动改写方言。EXISTS 与 NOT EXISTS 的参数必须是子查询。CAST 类型由解析器限定为内置类型。拒绝注释、反斜杠转义、PostgreSQL dollar-quoted 字符串和 WITH RECURSIVE；字符串里普通的 DELETE 等关键字不会被误判。
 
 行数只省略完整行，超大字段返回错误而非截断字段。限额以规范化结果的字节数计。限额不能替代数据库自身内存、CPU、网络和可见数据范围控制。
 
@@ -119,19 +119,19 @@ PostgreSQL 使用 `$1`、`$2` 等占位符，MySQL 和 SQLite 使用 `?`。参�
 
 只返回安全错误码，不返回驱动原始消息或堆栈：
 
-| 错误码             | 含义                                 |
-| ------------------ | ------------------------------------ |
-| CONFIG_ERROR       | 数据源凭据内容缺失或不合法           |
-| CREDENTIAL_ERROR   | 凭据缺失、不可读或写入失败           |
-| INVALID_REQUEST    | 输入或限额不合法                     |
-| SQL_REJECTED       | SQL 不在只读许可范围内               |
-| NOT_FOUND          | 数据源或指定表不可见或不存在         |
-| READ_ONLY_REQUIRED | 只读保护无法建立或账户权限过高       |
-| DATABASE_ERROR     | 连接、认证或执行失败，详细信息被隐藏 |
-| TIMEOUT            | 超过执行时间                         |
-| RESULT_TOO_LARGE   | 响应或字段过大                       |
-| BUSY               | 数据源并发达到上限，稍后重试         |
-| CLOSED             | 服务正在关闭或已关闭                 |
+| 错误码             | 含义                                         |
+| ------------------ | -------------------------------------------- |
+| CONFIG_ERROR       | 数据源凭据内容缺失或不合法                   |
+| CREDENTIAL_ERROR   | 凭据缺失、不可读或写入失败                   |
+| INVALID_REQUEST    | 输入或限额不合法                             |
+| SQL_REJECTED       | SQL 未通过只读校验（词法、语句类型或黑名单） |
+| NOT_FOUND          | 数据源或指定表不可见或不存在                 |
+| READ_ONLY_REQUIRED | 只读保护无法建立或账户权限过高               |
+| DATABASE_ERROR     | 连接、认证或执行失败，详细信息被隐藏         |
+| TIMEOUT            | 超过执行时间                                 |
+| RESULT_TOO_LARGE   | 响应或字段过大                               |
+| BUSY               | 数据源并发达到上限，稍后重试                 |
+| CLOSED             | 服务正在关闭或已关闭                         |
 
 ## 提交检查与 CI
 

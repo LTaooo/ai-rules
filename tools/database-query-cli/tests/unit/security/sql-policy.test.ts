@@ -20,6 +20,10 @@ describe('SQL policy', () => {
             'SELECT id FROM users WHERE id IN (SELECT user_id FROM teams)',
             'SELECT id FROM users WHERE EXISTS (SELECT 1 FROM teams WHERE teams.id = users.id)',
             'SELECT id FROM users WHERE NOT EXISTS (SELECT 1 FROM teams WHERE teams.id = users.id)',
+            'SELECT SUM(x) OVER (PARTITION BY y ORDER BY z) FROM t',
+            'SELECT unknown_udf(id) FROM users',
+            'SELECT pg_catalog.lower(name) FROM users',
+            'SELECT (SELECT MAX(id) FROM users) AS m FROM users',
         ])(`allows ${dialect}: %s`, (sql) => {
             expect(SqlPolicy.validateSql(sql, dialect)).toBeTruthy();
         });
@@ -40,27 +44,39 @@ describe('SQL policy', () => {
             'SELECT /*!50000 SQL_NO_CACHE */ 1',
             "SELECT load_extension('evil')",
             "SELECT nextval('sequence')",
+            "SELECT setval('sequence', 1)",
             "SELECT pg_read_file('/etc/passwd')",
-            'SELECT malicious_function(id) FROM users',
-            'SELECT ABS(malicious_function(id)) FROM users',
+            "SELECT pg_catalog.pg_read_file('/etc/passwd')",
+            "SELECT LOAD_FILE('/etc/passwd')",
+            'SELECT SLEEP(10)',
+            'SELECT BENCHMARK(1000000, MD5(1))',
+            "SELECT GET_LOCK('mutex', 10)",
+            'SELECT pg_advisory_lock(1)',
+            "SELECT dblink_connect('dbname=other')",
             'SELECT 1 FROM users WHERE EXISTS(id)',
             "SELECT 1 FROM users WHERE EXISTS(name LIKE 'a%')",
             'SELECT 1 FROM users WHERE NOT EXISTS(123)',
-            'SELECT pg_catalog.lower(name) FROM users',
             'SELECT * FROM users FOR UPDATE',
             'SELECT * FROM users FOR SHARE',
             'SELECT * INTO copied FROM users',
             "SELECT * FROM users INTO OUTFILE '/tmp/stolen'",
             'WITH changed AS (DELETE FROM users RETURNING *) SELECT * FROM changed',
+            'WITH x AS (DELETE FROM users) SELECT 1',
+            'WITH x AS (INSERT INTO users VALUES (1)) SELECT 1',
+            'WITH x AS (UPDATE users SET id = 2) SELECT 1',
             'WITH RECURSIVE t AS (SELECT 1) SELECT * FROM t',
+            'SELECT pg_advisory_lock_shared(1)',
+            'SELECT pg_try_advisory_lock(1)',
+            "SELECT lo_put(1, 0, 'x')",
+            'SELECT lo_unlink(1)',
+            "SELECT pg_replication_slot_advance('s', '0/0')",
+            "SELECT pg_logical_slot_get_changes('s', NULL, NULL)",
             'PRAGMA query_only = OFF',
             "ATTACH DATABASE 'other.db' AS other",
             'VACUUM',
             'SHOW TABLES',
             'EXPLAIN ANALYZE SELECT 1',
             'SELECT @secret := 1',
-            'SELECT SLEEP(10)',
-            'SELECT * FROM malicious_function()',
             'SELECT CAST(1 AS evil_type)',
             "SELECT E'escaped\\string'",
             'SELECT $$quoted$$',
@@ -113,33 +129,55 @@ describe('SQL policy', () => {
         ).toThrow();
     });
 
-    it('rejects functions outside the dialect allowlist', () => {
+    it('denies dangerous functions on every dialect without an allowlist', () => {
         expect(
             SqlPolicy.validateSql(
                 "SELECT DATE_FORMAT(created_at,'%Y-%m') FROM orders",
                 Dialect.MySQL,
             ),
         ).toBeTruthy();
-        expect(() =>
+        expect(
             SqlPolicy.validateSql(
                 "SELECT DATE_FORMAT(created_at,'%Y-%m') FROM orders",
                 Dialect.PostgreSQL,
             ),
-        ).toThrow();
-        expect(() =>
-            SqlPolicy.validateSql(
-                "SELECT DATE_FORMAT(created_at,'%Y-%m') FROM orders",
-                Dialect.SQLite,
-            ),
-        ).toThrow();
-        expect(
-            SqlPolicy.validateSql('SELECT CHAR_LENGTH(name) FROM users', Dialect.MySQL),
         ).toBeTruthy();
         expect(
-            SqlPolicy.validateSql('SELECT CHAR_LENGTH(name) FROM users', Dialect.PostgreSQL),
-        ).toBeTruthy();
-        expect(() =>
             SqlPolicy.validateSql('SELECT CHAR_LENGTH(name) FROM users', Dialect.SQLite),
+        ).toBeTruthy();
+        expect(() =>
+            SqlPolicy.validateSql("SELECT LOAD_FILE('/etc/passwd')", Dialect.MySQL),
+        ).toThrow();
+        expect(() =>
+            SqlPolicy.validateSql("SELECT LOAD_FILE('/etc/passwd')", Dialect.SQLite),
+        ).toThrow();
+    });
+
+    it('allows mysql date arithmetic and window functions', () => {
+        expect(
+            SqlPolicy.validateSql('SELECT NOW() - INTERVAL 7 DAY FROM orders', Dialect.MySQL),
+        ).toBeTruthy();
+        expect(
+            SqlPolicy.validateSql(
+                'SELECT DATE_ADD(created_at, INTERVAL 1 DAY) FROM orders',
+                Dialect.MySQL,
+            ),
+        ).toBeTruthy();
+        expect(
+            SqlPolicy.validateSql(
+                'SELECT ROW_NUMBER() OVER (ORDER BY id) FROM users',
+                Dialect.MySQL,
+            ),
+        ).toBeTruthy();
+    });
+
+    it('rejects mysql-only syntax the parser cannot express', () => {
+        // 索引提示不被 node-sql-parser 识别，语法层即拒绝；上游支持前无法放行。
+        expect(() =>
+            SqlPolicy.validateSql('SELECT id FROM users FORCE INDEX (idx_users)', Dialect.MySQL),
+        ).toThrow();
+        expect(() =>
+            SqlPolicy.validateSql('SELECT id FROM users LOCK IN SHARE MODE', Dialect.MySQL),
         ).toThrow();
     });
 

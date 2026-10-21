@@ -4,170 +4,106 @@ import { SafeError } from '../shared/errors/SafeError.js';
 import { Dialect } from '../domain/enums/Dialect.js';
 
 const parser = new sqlParser.Parser();
-const functions = new Set([
-    'COUNT',
-    'SUM',
-    'AVG',
-    'MIN',
-    'MAX',
-    'COALESCE',
-    'NULLIF',
-    'LOWER',
-    'UPPER',
-    'LENGTH',
-    'ABS',
-    'ROUND',
-    'TRIM',
-    'LTRIM',
-    'RTRIM',
-    'SUBSTR',
-    'SUBSTRING',
-    'CONCAT',
-    // EXISTS 解析为函数节点，参数必须是子查询；NOT EXISTS 则是 unary_expr 的操作符。
-    'EXISTS',
-]);
-// 方言扩展函数：DATE_FORMAT 仅 MySQL 提供，CHAR_LENGTH 在 SQLite 不存在。
-const dialectFunctions = new Map<Dialect, ReadonlySet<string>>([
-    [Dialect.MySQL, new Set([...functions, 'CHAR_LENGTH', 'DATE_FORMAT'])],
-    [Dialect.PostgreSQL, new Set([...functions, 'CHAR_LENGTH'])],
-    [Dialect.SQLite, functions],
-]);
-const types = new Set([
-    'select',
-    'expr',
-    'column_ref',
-    'binary_expr',
-    'unary_expr',
-    'aggr_func',
-    'function',
-    'expr_list',
-    'number',
-    'bool',
-    'null',
-    'single_quote_string',
-    'double_quote_string',
-    'default',
-    'star',
-    'origin',
-    'var',
-    'cast',
-    'case',
-    'when',
-    'else',
-    'ASC',
-    'DESC',
-    'DISTINCT',
+
+/**
+ * 危险函数黑名单，全方言统一，按函数最终标识符的大写形式匹配，限定名取最后一段。
+ * 枚举覆盖只读查询语境中的写副作用与资源滥用面：文件与服务器状态读取、休眠消耗、
+ * 锁获取与后端控制、序列推进、扩展加载与跨库通道；新条目须同步安全测试方可加入。
+ */
+const deniedFunctions = new Set([
+    'DBLINK',
+    'DBLINK_CANCEL_QUERY',
+    'DBLINK_CONNECT',
+    'DBLINK_ERROR_MESSAGE',
+    'DBLINK_EXEC',
+    'DBLINK_GET_NOTIFY',
+    'DBLINK_GET_RESULT',
+    'DBLINK_IS_BUSY',
+    'DBLINK_SEND_QUERY',
+    'BENCHMARK',
+    'GET_LOCK',
+    'IS_FREE_LOCK',
+    'IS_USED_LOCK',
+    'LOAD_EXTENSION',
+    'LOAD_FILE',
+    'LO_CREAT',
+    'LO_CREATE',
+    'LO_EXPORT',
+    'LO_FROM_BYTEA',
+    'LO_IMPORT',
+    'LO_PUT',
+    'LO_UNLINK',
+    'NEXTVAL',
+    'PG_ADVISORY_LOCK',
+    'PG_ADVISORY_LOCK_SHARED',
+    'PG_ADVISORY_UNLOCK',
+    'PG_ADVISORY_UNLOCK_ALL',
+    'PG_ADVISORY_UNLOCK_SHARED',
+    'PG_ADVISORY_XACT_LOCK',
+    'PG_ADVISORY_XACT_LOCK_SHARED',
+    'PG_CANCEL_BACKEND',
+    'PG_CURRENT_LOGFILE',
+    'PG_LS_DIR',
+    'PG_LOGICAL_SLOT_GET_CHANGES',
+    'PG_LOGICAL_SLOT_PEEK_CHANGES',
+    'PG_READ_BINARY_FILE',
+    'PG_READ_FILE',
+    'PG_RELOAD_CONF',
+    'PG_REPLICATION_SLOT_ADVANCE',
+    'PG_ROTATE_LOGFILE',
+    'PG_TRY_ADVISORY_LOCK',
+    'PG_TRY_ADVISORY_LOCK_SHARED',
+    'PG_TRY_ADVISORY_XACT_LOCK',
+    'PG_TRY_ADVISORY_XACT_LOCK_SHARED',
+    'PG_SLEEP',
+    'PG_SLEEP_FOR',
+    'PG_SLEEP_UNTIL',
+    'PG_STAT_FILE',
+    'PG_TERMINATE_BACKEND',
+    'RELEASE_ALL_LOCKS',
+    'RELEASE_LOCK',
+    'SETVAL',
+    'SLEEP',
 ]);
 /**
- * AST 键白名单，与 package.json 精确锁定的 node-sql-parser 版本输出一一对应。
- * 升级解析器视为安全事件：未列入的新键默认拒绝，逐键重审本清单并同步安全测试后方可加入。
+ * 非 SELECT 语句与写副作用节点的类型禁令，出现即拒绝；枚举对应锁定的
+ * node-sql-parser 5.4.0 语法，升级解析器时重新核对。匹配区分大小写，
+ * 语句类型 'desc' 因此不会误伤排序方向的 'DESC' 节点。
  */
-const keys = new Set([
-    'type',
-    'with',
-    'options',
-    'distinct',
-    'columns',
-    'into',
-    'from',
-    'where',
-    'groupby',
-    'having',
-    'orderby',
-    'limit',
-    'window',
-    'for_update',
-    'locking_read',
-    'collate',
-    '_next',
-    'set_op',
-    'expr',
-    'as',
-    'table',
-    'db',
-    'column',
-    'name',
-    'value',
-    'args',
-    'over',
-    'operator',
-    'left',
-    'right',
-    'ast',
-    'tableList',
-    'columnList',
-    'stmt',
-    'join',
-    'on',
-    'using',
-    'seperator',
-    'separator',
-    'nulls',
-    'prefix',
-    'members',
-    // MySQL 方言的 groupby 节点固定携带 modifiers 键，无子句修饰时为 [null]；
-    // 非 null 值是 WITH ROLLUP 的 origin 节点，仍被 origin 白名单规则拒绝。
-    'modifiers',
-    'quoted',
-    'keyword',
-    'symbol',
-    'target',
-    'dataType',
-    'length',
-    'parentheses',
-    'parenthesis',
-    'cond',
-    'result',
-    'position',
+const deniedTypes = new Set([
+    'insert',
+    'update',
+    'delete',
+    'replace',
+    'create',
+    'alter',
+    'drop',
+    'truncate',
+    'grant',
+    'revoke',
+    'rename',
+    'call',
+    'set',
+    'use',
+    'lock',
+    'unlock',
+    'show',
+    'explain',
+    'transaction',
+    'desc',
+    'load_data',
+    'declare',
+    'copy',
+    'do',
+    'kill',
+    'analyze',
+    'optimize',
+    'handler',
+    'help',
+    'assign',
 ]);
-const operators = new Set([
-    '=',
-    '!=',
-    '<>',
-    '<',
-    '<=',
-    '>',
-    '>=',
-    '+',
-    '-',
-    '*',
-    '/',
-    '%',
-    'AND',
-    'OR',
-    'IS',
-    'IS NOT',
-    'IN',
-    'NOT IN',
-    'LIKE',
-    'NOT LIKE',
-    'BETWEEN',
-    'NOT BETWEEN',
-    'NOT EXISTS',
-    '||',
-]);
-const castTypes = new Set([
-    'TEXT',
-    'CHAR',
-    'VARCHAR',
-    'INT',
-    'INTEGER',
-    'BIGINT',
-    'SMALLINT',
-    'NUMERIC',
-    'DECIMAL',
-    'REAL',
-    'FLOAT',
-    'DOUBLE',
-    'BOOLEAN',
-    'BOOL',
-    'DATE',
-    'TIMESTAMP',
-    'SIGNED',
-    'UNSIGNED',
-]);
-
-// 正向白名单：解析器节点与函数不在清单内的一律拒绝。
+/** 值非空即表示锁定读取或 RETURNING 子句的键；二者只属于写入与锁场景。 */
+const deniedValueKeys = ['for_update', 'locking_read', 'returning'];
 
 export class SqlPolicy {
     /** 终止不可信 SQL 的验证，仅抛出不包含 SQL 的安全错误。 */
@@ -195,6 +131,16 @@ export class SqlPolicy {
         const values = list.value;
         if (!Array.isArray(values) || values.length !== 1) return SqlPolicy.reject();
         SqlPolicy.requireSubquery(values[0]);
+    }
+
+    /** 提取函数名的最后一段标识符；限定名与带引号名防止引用样式绕过黑名单。 */
+    private static finalIdentifier(name: unknown): string {
+        const parts = SqlPolicy.record(name).name;
+        if (!Array.isArray(parts) || parts.length === 0) return SqlPolicy.reject();
+        const part = SqlPolicy.record(parts[parts.length - 1]);
+        const value: unknown = part.value;
+        if (typeof value !== 'string') return SqlPolicy.reject();
+        return value;
     }
 
     /** 拒绝注释、反斜杠、异常引号、多语句和过深括号，消除方言解析歧义。 */
@@ -231,7 +177,7 @@ export class SqlPolicy {
         return sql.trim().replace(/;$/, '').trim();
     }
 
-    /** 递归验证 SQL AST 的键、节点、操作符和函数；超出白名单或深度即拒绝。 */
+    /** 递归检查 SQL AST：语句形态契约与危险黑名单之外一律放行，交给数据库解释。 */
     private static visit(value: unknown, dialect: Dialect, depth: number): void {
         if (depth > 64) SqlPolicy.reject();
         if (value === null || value === undefined || typeof value !== 'object') return;
@@ -240,49 +186,20 @@ export class SqlPolicy {
             return;
         }
         const node = SqlPolicy.record(value);
-        for (const key of Object.keys(node)) if (!keys.has(key)) SqlPolicy.reject();
-        if (
-            node.type !== undefined &&
-            node.type !== null &&
-            (typeof node.type !== 'string' || !types.has(node.type))
-        )
-            SqlPolicy.reject();
-        for (const key of ['options', 'window', 'for_update', 'locking_read', 'collate', 'over'])
+        // 子查询包装必须携带 SELECT；CTE 体的语句节点则由 deniedTypes 拦截，
+        // 该禁令与包装形状无关，覆盖两种方言不同的 CTE 结构。
+        if ('ast' in node) SqlPolicy.requireSubquery(node);
+        for (const key of deniedValueKeys)
             if (node[key] !== undefined && node[key] !== null) SqlPolicy.reject();
+        // WITH RECURSIVE 在只读服务中无正当用途，递归标记出现即拒绝。
+        if (node.recursive !== undefined && node.recursive !== null) SqlPolicy.reject();
         if (node.into !== undefined && node.into !== null) {
             const into = SqlPolicy.record(node.into);
             if (Object.keys(into).length !== 1 || into.position !== null) SqlPolicy.reject();
         }
-        if (
-            node.operator !== undefined &&
-            (typeof node.operator !== 'string' ||
-                (!operators.has(node.operator.toUpperCase()) &&
-                    !['NOT', '+', '-'].includes(String(node.operator).toUpperCase())))
-        )
-            SqlPolicy.reject();
-        if (typeof node.operator === 'string' && node.operator.toUpperCase() === 'NOT EXISTS')
-            SqlPolicy.requireSubquery(node.expr);
-        if (
-            node.join !== undefined &&
-            ![
-                'JOIN',
-                'INNER JOIN',
-                'LEFT JOIN',
-                'LEFT OUTER JOIN',
-                'RIGHT JOIN',
-                'RIGHT OUTER JOIN',
-                'FULL JOIN',
-                'FULL OUTER JOIN',
-                'CROSS JOIN',
-            ].includes(String(node.join))
-        )
-            SqlPolicy.reject();
-        if (
-            node.set_op !== undefined &&
-            !['union', 'union all', 'intersect', 'except'].includes(
-                String(node.set_op).toLowerCase(),
-            )
-        )
+        // 会话变量赋值以 assign 节点或 := 操作符两种形状出现，均拒绝。
+        if (typeof node.type === 'string' && deniedTypes.has(node.type)) SqlPolicy.reject();
+        if (typeof node.operator === 'string' && node.operator.toUpperCase() === ':=')
             SqlPolicy.reject();
         if (dialect !== Dialect.PostgreSQL && node.db) SqlPolicy.reject();
         if (node.type === 'origin' && node.value !== '?') SqlPolicy.reject();
@@ -300,26 +217,17 @@ export class SqlPolicy {
         )
             SqlPolicy.reject();
         if (node.type === 'function' || node.type === 'aggr_func') {
-            let name = node.name;
-            if (typeof name !== 'string') {
-                const parts = SqlPolicy.record(name).name;
-                if (!Array.isArray(parts) || parts.length !== 1) SqlPolicy.reject();
-                const part = SqlPolicy.record(parts[0]);
-                if (part.type !== 'default') SqlPolicy.reject();
-                name = part.value;
-            }
-            if (typeof name !== 'string') return SqlPolicy.reject();
-            const upper = name.toUpperCase();
-            if (!dialectFunctions.get(dialect)?.has(upper)) SqlPolicy.reject();
-            if (upper === 'EXISTS') SqlPolicy.requireExistsSubquery(node.args);
+            const raw = node.name;
+            const name = typeof raw === 'string' ? raw : SqlPolicy.finalIdentifier(raw);
+            if (deniedFunctions.has(name.toUpperCase())) return SqlPolicy.reject();
+            if (name.toUpperCase() === 'EXISTS') SqlPolicy.requireExistsSubquery(node.args);
         }
-        if (node.dataType !== undefined && !castTypes.has(String(node.dataType).toUpperCase()))
-            SqlPolicy.reject();
         for (const child of Object.values(node)) SqlPolicy.visit(child, dialect, depth + 1);
     }
 
     /**
-     * 以词法检查和 AST 正向白名单验证单条只读 SELECT；未知语法、函数与写入全部拒绝。
+     * 以词法检查、SELECT 语句类型和危险黑名单验证单条只读语句；写入与注入面形状拒绝，
+     * 其余语法交给数据库解释，由只读账户、只读事务和执行超时兜底。
      * @param dialect 数据源方言，决定 AST 校验规则。
      * @returns 规范化后的 SQL 文本（去除尾部分号）。
      */

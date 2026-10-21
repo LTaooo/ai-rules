@@ -43,7 +43,7 @@ node "$cli" --help
 1. 执行 `list`，根据公开别名和描述确定数据源。不猜测数据库名；目标不明确时询问用户。
 2. 执行 `describe --database <别名>`；已知表名时用 `--table <表名>`，否则用 `--table-like '片段'`（包含匹配，`*`、`%`、`?` 均可作为通配符）。不要无过滤整库 describe：结果被截断时命令返回 `RESULT_TOO_LARGE`，应改用过滤而不是重试。PostgreSQL 可指定 schema；SQLite 不传 schema，MySQL 不跨配置数据库查询。
 3. 根据实际结构编写最小必要 SELECT，优先明确列名、筛选条件和较小行数；不默认导出整表或读取密码、令牌等敏感列。
-4. SQL 和参数文件保存在当前任务专用目录，使用 UTF-8 无 BOM。业务值使用占位符绑定，不拼接用户输入。PostgreSQL 使用 `$1` 等占位符，MySQL/SQLite 使用 `?`。SQL 内不写注释，白名单会整体拒绝。
+4. SQL 和参数文件保存在当前任务专用目录，使用 UTF-8 无 BOM。业务值使用占位符绑定，不拼接用户输入。PostgreSQL 使用 `$1` 等占位符，MySQL/SQLite 使用 `?`。SQL 内不写注释，词法检查会整体拒绝。
 5. 调用 `query --database <别名> --sql-file <SQL文件> --max-rows <正整数>`；参数用 `--parameters-file <JSON文件>` 或内联 `--parameters '[1]'`，两者不可同时使用。无参数时两者都省略；参数为字符串、有限数字、布尔值或 null 组成的 JSON 数组。内联参数会留在 shell 历史与进程列表中，敏感业务值仍用文件绑定。
 6. SQL 从 stdin 读取时指定 `--sql-file -`；SQL 与参数文件不同时共用 stdin。
 7. 检查退出码、`rowCount` 和 `truncated`。结果截断时说明不完整，不把部分结果当作完整统计，也不自动调高限制或无限重试。
@@ -55,7 +55,7 @@ node "$cli" --help
 - 非零退出或 stderr 安全错误码表示失败；只报告错误码及必要上下文，不输出驱动原始异常。
 - `CONFIG_ERROR`：请用户检查数据源条目；`NOT_FOUND`：核对公开别名或可见表；`INVALID_REQUEST`：检查 CLI 帮助和参数格式。
 - `CREDENTIAL_ERROR`：数据源不可用或未配置；请用户重新运行 `init` 向导，不尝试读取凭据内容。
-- `SQL_REJECTED`、`READ_ONLY_REQUIRED`：停止，不绕过白名单、只读事务或账户保护。
+- `SQL_REJECTED`、`READ_ONLY_REQUIRED`：停止，不绕过 SQL 校验、只读事务或账户保护。
 - `TIMEOUT`、`RESULT_TOO_LARGE`：缩小查询范围或返回列；整库 describe 被截断时改用 `--table` 或 `--table-like` 过滤，不自动提高安全限额。`DATABASE_ERROR`：报告连接或执行失败，不读取凭证排查。
-- 不执行写入、DDL、多语句、事务管理、未知函数或文件输出；不得改用 cli、原生数据库 CLI、驱动脚本或修改程序来绕过限制。
+- 不执行写入、DDL、多语句、事务管理、文件输出或危险函数（文件读取、休眠、加锁类）；不得改用 cli、原生数据库 CLI、驱动脚本或修改程序来绕过限制。
 - 单进程并发上限不限制多个 CLI 进程的总并发；不要批量并行启动查询制造数据库负载。
