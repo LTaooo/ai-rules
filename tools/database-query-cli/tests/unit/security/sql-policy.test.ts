@@ -169,6 +169,36 @@ describe('SQL policy', () => {
                 Dialect.MySQL,
             ),
         ).toBeTruthy();
+        expect(
+            SqlPolicy.validateSql(
+                'SELECT TIMESTAMPDIFF(MONTH, review_time, NOW()) FROM dcd_product_review',
+                Dialect.MySQL,
+            ),
+        ).toBeTruthy();
+        expect(
+            SqlPolicy.validateSql(
+                'SELECT TIMESTAMPADD(DAY, 7, created_at) FROM orders',
+                Dialect.MySQL,
+            ),
+        ).toBeTruthy();
+        expect(
+            SqlPolicy.validateSql("SELECT TRIM(BOTH ' ' FROM name) FROM users", Dialect.MySQL),
+        ).toBeTruthy();
+        expect(
+            SqlPolicy.validateSql(
+                'SELECT EXTRACT(YEAR FROM created_at) FROM orders',
+                Dialect.MySQL,
+            ),
+        ).toBeTruthy();
+    });
+
+    it('rejects mysql window frame clauses', () => {
+        expect(() =>
+            SqlPolicy.validateSql(
+                'SELECT SUM(x) OVER (ORDER BY id ROWS BETWEEN 1 PRECEDING AND CURRENT ROW) FROM t',
+                Dialect.MySQL,
+            ),
+        ).toThrow();
     });
 
     it('rejects mysql-only syntax the parser cannot express', () => {

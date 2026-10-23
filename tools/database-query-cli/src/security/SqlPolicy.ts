@@ -66,6 +66,32 @@ const deniedFunctions = new Set([
     'SLEEP',
 ]);
 /**
+ * origin 透传节点放行的关键字面，大小写不敏感精确匹配：日期单位、修剪方向、
+ * 全文搜索模式与 TRIM 结构词。均为语法定界关键字而非用户表达式，无法携带
+ * 注入文本；帧子句、WITH ROLLUP 与事务词汇不在此列，仍然拒绝。
+ */
+const allowedOrigin = new Set([
+    'MICROSECOND',
+    'SECOND',
+    'MINUTE',
+    'HOUR',
+    'DAY',
+    'WEEK',
+    'MONTH',
+    'QUARTER',
+    'YEAR',
+    'BOTH',
+    'LEADING',
+    'TRAILING',
+    'TRIM',
+    'FROM',
+    'IN BOOLEAN MODE',
+    'IN NATURAL LANGUAGE MODE',
+    'IN NATURAL LANGUAGE MODE WITH QUERY EXPANSION',
+    'WITH QUERY EXPANSION',
+]);
+
+/**
  * 非 SELECT 语句与写副作用节点的类型禁令，出现即拒绝；枚举对应锁定的
  * node-sql-parser 5.4.0 语法，升级解析器时重新核对。匹配区分大小写，
  * 语句类型 'desc' 因此不会误伤排序方向的 'DESC' 节点。
@@ -202,7 +228,12 @@ export class SqlPolicy {
         if (typeof node.operator === 'string' && node.operator.toUpperCase() === ':=')
             SqlPolicy.reject();
         if (dialect !== Dialect.PostgreSQL && node.db) SqlPolicy.reject();
-        if (node.type === 'origin' && node.value !== '?') SqlPolicy.reject();
+        if (
+            node.type === 'origin' &&
+            node.value !== '?' &&
+            !allowedOrigin.has(String(node.value).toUpperCase())
+        )
+            SqlPolicy.reject();
         if (
             node.type === 'var' &&
             !(
