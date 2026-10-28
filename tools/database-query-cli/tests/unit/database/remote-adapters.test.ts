@@ -307,7 +307,7 @@ describe('remote adapters with fake drivers', () => {
             query: ReturnType<typeof vi.fn>;
         };
         expect(promise.query).toHaveBeenCalledWith('START TRANSACTION READ ONLY');
-        expect(promise.query).toHaveBeenCalledWith('SET SESSION MAX_EXECUTION_TIME = 10000');
+        expect(promise.query).toHaveBeenCalledWith('SET SESSION MAX_EXECUTION_TIME = 20000');
         expect(connection.execute).toHaveBeenCalledWith('SELECT ? AS id', [1]);
         expect(connection.destroy).toHaveBeenCalled();
         await adapter.close();

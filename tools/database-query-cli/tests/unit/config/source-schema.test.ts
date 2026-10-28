@@ -51,7 +51,7 @@ describe('source schema', () => {
     it('exposes built-in default limits', () => {
         expect(SourceSchema.defaultLimits).toEqual({
             maxRows: 1000,
-            timeoutMs: 10000,
+            timeoutMs: 20000,
             maxResponseBytes: 1048576,
             maxConcurrency: 4,
         });

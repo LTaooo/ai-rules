@@ -10,7 +10,7 @@ export class SourceSchema {
     /** 内置查询安全上限；无配置文件，全部数据源共用同一组默认。 */
     public static readonly defaultLimits: Readonly<Limits> = Object.freeze({
         maxRows: 1000,
-        timeoutMs: 10000,
+        timeoutMs: 20000,
         maxResponseBytes: 1048576,
         maxConcurrency: 4,
     });
