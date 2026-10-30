@@ -230,7 +230,7 @@ describe('query service', () => {
     });
 
     it('rejects oversized fields and bounds concurrency', async () => {
-        const { service, adapter } = setup([['a'.repeat(1048577)]]);
+        const { service, adapter } = setup([['a'.repeat(3145729)]]);
         await expect(service.query({ database: 'sales', sql: 'SELECT 1' })).rejects.toThrow(
             'RESULT_TOO_LARGE',
         );

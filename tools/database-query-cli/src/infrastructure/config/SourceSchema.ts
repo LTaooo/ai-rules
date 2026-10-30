@@ -11,7 +11,7 @@ export class SourceSchema {
     public static readonly defaultLimits: Readonly<Limits> = Object.freeze({
         maxRows: 1000,
         timeoutMs: 20000,
-        maxResponseBytes: 1048576,
+        maxResponseBytes: 3145728,
         maxConcurrency: 4,
     });
     /** 数据源公开别名的允许字符集。 */

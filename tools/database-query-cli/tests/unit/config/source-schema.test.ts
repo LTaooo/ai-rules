@@ -52,7 +52,7 @@ describe('source schema', () => {
         expect(SourceSchema.defaultLimits).toEqual({
             maxRows: 1000,
             timeoutMs: 20000,
-            maxResponseBytes: 1048576,
+            maxResponseBytes: 3145728,
             maxConcurrency: 4,
         });
     });
