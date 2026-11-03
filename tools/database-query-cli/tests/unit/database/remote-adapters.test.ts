@@ -101,6 +101,17 @@ vi.mock('mysql2', async () => {
                         stream: () => ReadableType;
                     };
                     query.stream = () => {
+                        if (mocks.mode === 'maria-timeout') {
+                            const stream = new Readable({ objectMode: true, read() {} });
+                            queueMicrotask(() =>
+                                stream.destroy(
+                                    Object.assign(new Error('max_statement_time exceeded'), {
+                                        errno: 1969,
+                                    }),
+                                ),
+                            );
+                            return stream;
+                        }
                         const stream =
                             mocks.mode === 'hang'
                                 ? new Readable({ objectMode: true, read() {} })
@@ -238,7 +249,48 @@ describe('remote adapters with fake drivers', () => {
         },
     );
 
-    it.each(['5.6.4', '5.8.1', '8.0.36-MariaDB', '9.0.1', '8.0.36-custom'])(
+    it.each([
+        '10.1.48-MariaDB',
+        '10.4.28-MariaDB',
+        '10.4.28-MariaDB-0ubuntu0.20.04.1',
+        '10.11.6-MariaDB',
+        '11.4.5-MariaDB',
+    ])('uses max_statement_time on MariaDB %s', async (version) => {
+        mocks.mysqlVersion = version;
+        const adapter = new MysqlAdapter(sourceUrl('mysql://reader:fake@localhost/db'));
+        await adapter.query('SELECT 1', [], limits());
+        const connection = mocks.mysqlConnections[0] as { promise: ReturnType<typeof vi.fn> };
+        const promise = connection.promise.mock.results[0]?.value as {
+            query: ReturnType<typeof vi.fn>;
+        };
+        expect(promise.query).toHaveBeenCalledWith('SET SESSION max_statement_time = 20');
+        expect(promise.query).not.toHaveBeenCalledWith(
+            expect.stringContaining('MAX_EXECUTION_TIME'),
+        );
+        await adapter.close();
+    });
+
+    it('converts MariaDB timeout milliseconds to seconds', async () => {
+        mocks.mysqlVersion = '10.4.28-MariaDB';
+        const adapter = new MysqlAdapter(sourceUrl('mysql://reader:fake@localhost/db'));
+        await adapter.query('SELECT 1', [], limits({ timeoutMs: 1500 }));
+        const connection = mocks.mysqlConnections[0] as { promise: ReturnType<typeof vi.fn> };
+        const promise = connection.promise.mock.results[0]?.value as {
+            query: ReturnType<typeof vi.fn>;
+        };
+        expect(promise.query).toHaveBeenCalledWith('SET SESSION max_statement_time = 1.5');
+        await adapter.close();
+    });
+
+    it('maps MariaDB statement timeout to TIMEOUT', async () => {
+        mocks.mysqlVersion = '10.4.28-MariaDB';
+        mocks.mode = 'maria-timeout';
+        const adapter = new MysqlAdapter(sourceUrl('mysql://reader:fake@localhost/db'));
+        await expect(adapter.query('SELECT 1', [], limits())).rejects.toThrow('TIMEOUT');
+        await adapter.close();
+    });
+
+    it.each(['5.6.4', '5.8.1', '8.0.36-MariaDB', '10.0.38-MariaDB', '9.0.1', '8.0.36-custom'])(
         'rejects unsupported MySQL version %s',
         async (version) => {
             mocks.mysqlVersion = version;

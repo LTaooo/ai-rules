@@ -35,6 +35,7 @@ it.each([
     ['close', '5.6.51'],
     ['timeout', '8.0.40'],
     ['close', '8.0.40'],
+    ['timeout', '10.4.28-MariaDB'],
 ] as const)(
     'destroys the real MySQL socket after %s on %s without leaving a half-open connection',
     async (mode, version) => {
@@ -149,6 +150,9 @@ it.each([
             expect(statements).toContain('START TRANSACTION READ ONLY');
             expect(statements.some((sql) => sql.includes('MAX_EXECUTION_TIME'))).toBe(
                 version.startsWith('8.'),
+            );
+            expect(statements.some((sql) => sql.includes('max_statement_time'))).toBe(
+                version.includes('MariaDB'),
             );
             if (mode === 'close') await bounded(adapter.close());
             await expect(bounded(outcome)).resolves.toMatchObject({

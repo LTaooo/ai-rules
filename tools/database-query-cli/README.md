@@ -82,8 +82,8 @@ node dist/cli.js init
 - 远程数据库必填 `host`、`database`、`username`、`password`，端口必须是 1–65535 的整数，缺省为 PostgreSQL 5432、MySQL 3306。密码长度 1–1024。不使用 URL。
 - SQLite 必须使用绝对 `filename`，不允许 `:memory:`；SQLite 条目没有密码字段，文件缺失在查询时报数据库错误。
 - PostgreSQL `sslMode` 为 `disable`、`require` 或 `verify-full`，默认 `require`（加密但不验证证书）；远程连接建议 `verify-full` 并配置信任链。
-- MySQL 支持 5.6.5+ 的 5.6、5.7 和 8.x；每次连接通过内部版本查询选择超时策略。仅接受数字版本及 `-log`、`-community`、`-community-log` 后缀；MariaDB、未知厂商后缀、其他版本系列和非法版本在业务查询前拒绝。`tls` 只接受布尔值，默认 false，true 时验证服务器证书。未知字段一律拒绝，不能开启多语句。
-- MySQL 5.6 和 5.7.0–5.7.7 仅有客户端超时及强制断连，没有服务端执行时限；关闭本地 Socket 不保证服务端查询立即停止。5.7.8+ 和 8.x 保留 `MAX_EXECUTION_TIME`。旧版本已停止维护，建议升级，并由管理员配置独立资源约束。SQL 不自动改写为旧版方言。
+- MySQL 支持 5.6.5+ 的 5.6、5.7 和 8.x；MariaDB 支持 10.1+（含 10.x 与 11.x）。每次连接通过内部版本查询选择超时策略。MySQL 仅接受数字版本及 `-log`、`-community`、`-community-log` 后缀；MariaDB 接受 `-MariaDB` 及发行版追加的构建标签。未知厂商后缀、其他版本系列和非法版本在业务查询前拒绝。`tls` 只接受布尔值，默认 false，true 时验证服务器证书。未知字段一律拒绝，不能开启多语句。
+- MySQL 5.6 和 5.7.0–5.7.7 仅有客户端超时及强制断连，没有服务端执行时限；关闭本地 Socket 不保证服务端查询立即停止。5.7.8+ 和 8.x 保留 `MAX_EXECUTION_TIME`；MariaDB 10.1+ 使用 `max_statement_time`（秒）。旧版本已停止维护，建议升级，并由管理员配置独立资源约束。SQL 不自动改写为旧版方言。
 - 描述是公开信息，不要在描述、别名中写入密码、连接串或私密地址。
 - 行数硬上限 1000（可调至 10000）、超时 20 秒（至 60000 毫秒）、响应 3 MiB（至 10 MiB）、并发每数据源 4（至 16）为内置默认，当前版本不接受外部覆盖。
 

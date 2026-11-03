@@ -45,21 +45,36 @@ export class MysqlAdapter implements DatabaseAdapter {
         }
     }
 
-    /** 校验单行版本结果并判断服务端超时能力；未知版本拒绝执行业务查询。 */
-    private requiresExecutionTimeLimit(result: unknown): boolean {
+    /**
+     * 校验单行版本结果并返回可用的会话级超时变量；未知版本拒绝执行业务查询。
+     * MySQL 5.6.5+ 与 5.7.0–5.7.7 只有客户端超时；MariaDB 自 10.1 起支持 max_statement_time。
+     */
+    private serverTimeoutVariable(
+        result: unknown,
+    ): 'MAX_EXECUTION_TIME' | 'max_statement_time' | undefined {
         if (!Array.isArray(result) || result.length !== 1)
             throw new SafeError(ErrorCode.DatabaseError);
         const row = result[0];
         if (!Array.isArray(row) || row.length !== 1 || typeof row[0] !== 'string')
             throw new SafeError(ErrorCode.DatabaseError);
-        const match = /^(\d+)\.(\d+)\.(\d+)(?:-(?:community(?:-log)?|log))?$/.exec(row[0]);
-        if (!match) throw new SafeError(ErrorCode.DatabaseError);
-        const [major, minor, patch] = match.slice(1).map(Number);
-        if (![major, minor, patch].every(Number.isSafeInteger))
+        const version = row[0];
+        const mysqlMatch = /^(\d+)\.(\d+)\.(\d+)(?:-(?:community(?:-log)?|log))?$/.exec(version);
+        if (mysqlMatch !== null) {
+            const [major, minor, patch] = mysqlMatch.slice(1).map(Number);
+            if (![major, minor, patch].every(Number.isSafeInteger))
+                throw new SafeError(ErrorCode.DatabaseError);
+            if (major === 5 && minor === 6 && patch! >= 5) return undefined;
+            if (major === 5 && minor === 7) return patch! >= 8 ? 'MAX_EXECUTION_TIME' : undefined;
+            if (major === 8) return 'MAX_EXECUTION_TIME';
             throw new SafeError(ErrorCode.DatabaseError);
-        if (major === 5 && minor === 6 && patch! >= 5) return false;
-        if (major === 5 && minor === 7) return patch! >= 8;
-        if (major === 8) return true;
+        }
+        // 发行版构建会在 -MariaDB 后追加版本标签，如 10.4.28-MariaDB-0ubuntu0.20.04.1。
+        const mariaMatch = /^(\d+)\.(\d+)\.(\d+)-MariaDB(?:-[0-9A-Za-z.+~:_-]+)?$/.exec(version);
+        if (mariaMatch === null) throw new SafeError(ErrorCode.DatabaseError);
+        const [major, minor] = mariaMatch.slice(1, 3).map(Number);
+        if (!Number.isSafeInteger(major) || !Number.isSafeInteger(minor))
+            throw new SafeError(ErrorCode.DatabaseError);
+        if (major! > 10 || (major === 10 && minor! >= 1)) return 'max_statement_time';
         throw new SafeError(ErrorCode.DatabaseError);
     }
 
@@ -98,12 +113,16 @@ export class MysqlAdapter implements DatabaseAdapter {
             await control.connect();
             stage = DatabaseStage.VersionCheck;
             const [versionRows] = await control.query('SELECT VERSION()');
-            const serverTimeout = this.requiresExecutionTimeLimit(versionRows);
+            const serverTimeout = this.serverTimeoutVariable(versionRows);
             stage = DatabaseStage.ReadOnly;
             await control.query('SET SESSION TRANSACTION READ ONLY');
-            if (serverTimeout) {
+            if (serverTimeout !== undefined) {
                 stage = DatabaseStage.Timeout;
-                await control.query(`SET SESSION MAX_EXECUTION_TIME = ${limits.timeoutMs}`);
+                const value =
+                    serverTimeout === 'max_statement_time'
+                        ? limits.timeoutMs / 1000
+                        : limits.timeoutMs;
+                await control.query(`SET SESSION ${serverTimeout} = ${value}`);
             }
             stage = DatabaseStage.Begin;
             await control.query('START TRANSACTION READ ONLY');
@@ -136,11 +155,12 @@ export class MysqlAdapter implements DatabaseAdapter {
         try {
             return await Promise.race([execute(), deadline]);
         } catch (error) {
+            // MariaDB 的 max_statement_time 超时没有 ER_ 名称，驱动只保留 errno 1969。
             if (
                 error !== null &&
                 typeof error === 'object' &&
-                'code' in error &&
-                error.code === 'ER_QUERY_TIMEOUT'
+                (('code' in error && error.code === 'ER_QUERY_TIMEOUT') ||
+                    ('errno' in error && error.errno === 1969))
             )
                 throw new SafeError(ErrorCode.Timeout);
             throw SafeError.database(error, stage);
