@@ -1,5 +1,6 @@
 import { readFile } from 'node:fs/promises';
 import { QueryService } from '../../application/QueryService.js';
+import { EditWizard } from './EditWizard.js';
 import { InitWizard } from './InitWizard.js';
 import { WindowsCredentialStore } from '../../infrastructure/credentials/WindowsCredentialStore.js';
 import { StaticSourceRegistry } from '../../infrastructure/credentials/StaticSourceRegistry.js';
@@ -8,7 +9,7 @@ import { ErrorCode } from '../../domain/enums/ErrorCode.js';
 import { SafeError } from '../../shared/errors/SafeError.js';
 import type { Parameter } from '../../domain/models/QueryResult.js';
 
-type Command = 'list' | 'describe' | 'query' | 'show' | 'init' | 'help';
+type Command = 'list' | 'describe' | 'query' | 'show' | 'init' | 'edit' | 'help';
 type Options = {
     command: Command;
     database?: string;
@@ -49,6 +50,9 @@ export class DatabaseCli {
             if (options.command === 'init') {
                 return await new InitWizard(this.stdin, this.stdout).run();
             }
+            if (options.command === 'edit') {
+                return await new EditWizard(this.stdin, this.stdout).run();
+            }
             const registry =
                 StaticSourceRegistry.tryFromEnvironment() ?? new WindowsCredentialStore();
             service = new QueryService(registry, undefined, undefined, new Logger(() => undefined));
@@ -82,7 +86,8 @@ export class DatabaseCli {
             command !== 'describe' &&
             command !== 'query' &&
             command !== 'show' &&
-            command !== 'init'
+            command !== 'init' &&
+            command !== 'edit'
         )
             throw new SafeError(ErrorCode.InvalidRequest);
         const options: Options = { command };
@@ -114,7 +119,7 @@ export class DatabaseCli {
 
     /** 校验每个子命令所需参数，防止把不相关字段传入应用层。 */
     private validateOptions(options: Options): void {
-        if (options.command === 'init') {
+        if (options.command === 'init' || options.command === 'edit') {
             if (
                 options.database ||
                 options.schema ||
@@ -268,8 +273,11 @@ export class DatabaseCli {
             '  database-query describe --database NAME [--schema NAME] [--table NAME|--table-like PATTERN]',
             '  database-query query --database NAME [--sql-file FILE|-] [--parameters-file FILE|--parameters JSON] [--max-rows N]',
             '  database-query init',
+            '  database-query edit',
             'show prints source identification only; host, port and user are not shown.',
             'init runs an interactive wizard that creates or replaces a data source; it requires a TTY.',
+            'edit runs an interactive wizard that updates a description or alias without re-entering credentials;',
+            'renaming writes and verifies the new credential, then removes the old one; it requires a TTY.',
             'SQL defaults to stdin; parameters must be a JSON array from a file or --parameters (not both).',
             '--table-like does a contains match on table names; % and _ are SQL wildcards, * is translated to %.',
             'Values passed via --parameters appear on the command line; prefer files for sensitive values.',

@@ -56,6 +56,10 @@ export class DatabaseConfig {
             password,
         });
     }
+    /** 返回替换别名与描述的新配置；其余字段（含密码）原样复制，原配置保持不可变。 */
+    public withNameAndDescription(name: string, description: string): DatabaseConfig {
+        return new DatabaseConfig({ ...this, name, description });
+    }
     /** 仅投影公开名称、类型和描述，不暴露地址、路径与凭证。 */
     public get publicInfo(): { name: string; type: Dialect; description?: string } {
         return {

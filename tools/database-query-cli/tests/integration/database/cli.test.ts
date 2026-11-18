@@ -93,7 +93,7 @@ it('runs compiled CLI list, describe, count and rejects writes against injected 
     }
 }, 60000);
 
-it('rejects non-interactive init and lists init in help', () => {
+it('rejects non-interactive init and edit and lists both in help', () => {
     mkdirSync('.test-artifacts', { recursive: true });
     const folder = mkdtempSync(resolve('.test-artifacts/cli-init-'));
     try {
@@ -103,6 +103,7 @@ it('rejects non-interactive init and lists init in help', () => {
         });
         expect(help.status).toBe(0);
         expect(help.stdout).toContain('init');
+        expect(help.stdout).toContain('edit');
         expect(help.stdout).not.toContain('--config');
         const run = spawnSync(process.execPath, [resolve('dist/cli.js'), 'init'], {
             encoding: 'utf8',
@@ -111,6 +112,21 @@ it('rejects non-interactive init and lists init in help', () => {
         });
         expect(run.status).toBe(1);
         expect(run.stderr.trim()).toBe('INVALID_REQUEST');
+        const edit = spawnSync(process.execPath, [resolve('dist/cli.js'), 'edit'], {
+            encoding: 'utf8',
+            input: '',
+            timeout: 15000,
+        });
+        expect(edit.status).toBe(1);
+        expect(edit.stderr.trim()).toBe('INVALID_REQUEST');
+        expect(edit.stdout).toBe('');
+        const editWithFlag = spawnSync(
+            process.execPath,
+            [resolve('dist/cli.js'), 'edit', '--database', 'local'],
+            { encoding: 'utf8', input: '', timeout: 15000 },
+        );
+        expect(editWithFlag.status).toBe(1);
+        expect(editWithFlag.stderr.trim()).toBe('INVALID_REQUEST');
     } finally {
         rmSync(folder, { recursive: true, force: true });
     }
