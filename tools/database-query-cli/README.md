@@ -15,6 +15,7 @@ $cli = Join-Path $HOME 'ai-rule/tools/database-query-cli/dist/cli.js'
 
 node $cli --help
 node $cli init
+node $cli edit
 node $cli list
 node $cli describe --database local --table orders
 node $cli query --database local --sql-file ./query.sql --parameters-file ./parameters.json --max-rows 100
@@ -31,15 +32,16 @@ SQL 默认从标准输入读取；参数化查询使用 `--sql-file`，若 SQL �
 - CLI 复用 `QueryService`、`SqlPolicy` 和数据库适配器，不通过 Skill 绕过只读保护。每次命令独立启动，并发限制不是跨 CLI 进程的全局限制。
 - 全部数据源配置（含密码）保存在 Windows 凭据管理器：每个数据源一条通用凭据，目标名为 `database-query.<别名>`，内容为整份 JSON 配置。没有任何配置文件；不接入云凭据管理，不使用 `.agentsignore`。
 - `init` 子命令运行交互式向导：询问数据源信息与密码（密码提示不回显），经 PowerShell `CredWriteW` 写入凭据管理器并读回验证。向导需要交互终端，由用户自行运行；命令不再接受任何路径参数。
+- `edit` 子命令运行交互式编辑向导：列出数据源供选择，当前描述与别名作为默认值，只修改这两个字段；密码与其他连接参数从凭据中原样保留，不显示、不重新输入。重命名先写入新目标并读回验证，再删除旧目标；旧目标删除失败时新条目仍可用，向导会提示手动执行 `cmdkey /delete`。向导需要交互终端，不接受任何参数。成功结果包含 `changed` 与 `renamed` 字段；两者都为 `false` 表示未写入凭据。
 
 CLI 目前是新增实现；使用前执行 `npm run check`，并用独立 SQLite 测试配置验证 CLI，不能用生产配置做冒烟测试。
 
 ## 能力与边界
 
-- 子命令覆盖数据源列表、结构查询与只读业务查询，详见快速开始与 `--help`。
-- 通用 SQL 仅接受单条 SELECT 与纯查询 WITH、UNION 组合；函数、操作符、窗口等其余语法不设许可清单。
+- 子命令覆盖数据源列表、创建与编辑、结构查询与只读业务查询，详见快速开始与 `--help`。
+- 通用 SQL 接受单条 SELECT 与纯查询 WITH、UNION 组合；MySQL 另支持当前库的表结构、索引与表统计类 SHOW，具体语法见下文。SELECT 的函数、操作符、窗口等其余语法不设许可清单。
 - 拒绝写入、删除、DDL、事务管理、多语句、注释、锁定读取（FOR UPDATE、LOCK IN SHARE MODE）、递归 CTE（WITH RECURSIVE）、输出文件、会话变量赋值和危险函数（文件读取、休眠、加锁、后端控制、序列推进、扩展加载、dblink）。
-- 使用词法检查、SELECT 语句类型白名单与危险黑名单校验，配合数据库只读保护和最小权限账户；可解析的未知语法交给数据库解释，由只读层兜底，解析不了的语法返回 `SQL_REJECTED`。
+- 使用统一词法检查、受限 MySQL SHOW 语法完整匹配、SELECT AST 类型与危险黑名单校验，配合数据库只读保护和最小权限账户。SHOW 在通用解析器前独立校验，不接受许可语法之外的子句；SELECT 可解析的未知语法交给数据库解释，由只读层兜底，解析不了的语法返回 `SQL_REJECTED`。
 - 默认最多返回 1000 行、20 秒执行时间、3 MiB 响应，每个数据源最多 4 个并发请求。
 - 数据源描述、地址、用户名和凭据目标名保存于凭据条目；远程数据库密码只存 Windows 凭据管理器，JSON 不含明文密码。不接入云凭据管理，不使用 `.agentsignore`。
 - 运行日志使用 JSON Lines 写入 stderr，记录启动、停止、请求状态、耗时、行数、截断标识和安全错误码；不记录 SQL、参数、连接串、凭证或查询数据。
@@ -56,9 +58,10 @@ CLI 目前是新增实现；使用前执行 `npm run check`，并用独立 SQLit
 npm ci
 npm run build
 node dist/cli.js init
+node dist/cli.js edit
 ```
 
-向导依次询问数据源信息，密码通过不回显的提示输入：整份配置（含密码）作为一条凭据写入 Windows 凭据管理器，不产生任何配置文件。明文只在工具内存中短暂存在（查询阶段同样如此），不落盘、不进日志、不进命令行。删除某个数据源用 `cmdkey /delete:database-query.<别名>`；修改后重新运行 `init`，同名条目确认替换。`AGENTS.md` 是行为约定，不是文件访问控制：能够使用终端或修改服务代码的 agent 仍可能在运行时取得凭证。
+向导依次询问数据源信息，密码通过不回显的提示输入：整份配置（含密码）作为一条凭据写入 Windows 凭据管理器，不产生任何配置文件。明文只在工具内存中短暂存在（查询阶段同样如此），不落盘、不进日志、不进命令行。删除某个数据源用 `cmdkey /delete:database-query.<别名>`；修改描述或重命名运行 `edit`，不重输密码；修改连接参数或密码重新运行 `init`，同名条目确认替换。`AGENTS.md` 是行为约定，不是文件访问控制：能够使用终端或修改服务代码的 agent 仍可能在运行时取得凭证。
 
 ## 数据源与凭据
 
@@ -94,6 +97,24 @@ node dist/cli.js init
 `describe --database sales --schema public --table orders`，模糊过滤用 `--table-like 'order%'`。
 
 `table` 精确匹配；`tableLike` 模糊过滤——不含 `%` 时按包含匹配（`*`、`?` 自动转译为通配符），含 `%` 时按 SQL LIKE 原样使用。两者互斥；无过滤且结果被截断时返回 `RESULT_TOO_LARGE`。返回统一的列信息查询结果，列包括 `schema_name`、`table_name`、`table_type`、`column_name`、`data_type`、`nullable`、`primary_key`。可不填 table，查询可见结构；PostgreSQL 默认 public。SQLite 不接受 schema，MySQL 的 schema 只能是当前配置数据库。
+
+### MySQL 元数据 SHOW
+
+通过 `query` 执行以下单条 SQL；MySQL 与 MariaDB 使用相同范围，PostgreSQL 和 SQLite 不支持这些 SHOW。方括号表示可选部分，`|` 表示关键词选项，不是实际 SQL 字符：
+
+```sql
+SHOW [FULL] TABLES [LIKE 'pattern']
+SHOW [FULL] {COLUMNS | FIELDS} {FROM | IN} table [LIKE 'pattern']
+SHOW {INDEX | INDEXES | KEYS} {FROM | IN} table
+SHOW CREATE TABLE table
+SHOW TABLE STATUS [LIKE 'pattern']
+```
+
+例如 `SHOW CREATE TABLE book;`、`SHOW INDEX FROM book;`、`SHOW FULL TABLES LIKE 'book%';`。关键词不区分大小写；表名仅接受单段未引用标识符或反引号标识符，反引号内用双反引号转义。所有显式库限定均拒绝，包括 `db.book`、额外的 `FROM db` / `IN db`；查询目标始终是数据源配置的当前数据库。
+
+LIKE 只接受单引号字面量，内部单引号用双单引号转义；不支持 `LIKE ?`、反斜杠、WHERE、变量、函数或其他额外子句。动态结构过滤使用 `describe --table-like`，不要拼接不可信输入。执行仍使用参数化驱动接口、只读事务与相同的行数、字节及超时限制，不降级为文本插值查询。
+
+未列出的 SHOW 均返回 `SQL_REJECTED`，包括 DATABASES、PROCESSLIST、GRANTS、CREATE USER、VARIABLES、STATUS、ENGINE 与复制日志类。表定义、默认值、注释及表选项仍可能包含敏感业务信息；支持元数据查询不代表输出天然不敏感。CLI 的 `show --database` 仅用于查看数据源业务标识，与 SQL SHOW 是两个不同入口。
 
 ### 业务查询
 
@@ -150,7 +171,7 @@ check 执行格式检查、ESLint、源码和测试类型检查、编译和测�
 
 默认测试使用真实 SQLite 临时文件与隔离临时 Git 仓库；所有临时文件在 `.test-artifacts` 内。Git 钩子测试不创建提交。
 
-PostgreSQL、MySQL 的连接策略、超时和清理用伪驱动验证；额外使用真实 mysql2 驱动和本机假协议端点验证底层 Socket 在超时和退出时确实销毁。凭据读写用注入的伪子进程验证协议、超时与错误映射，不触碰真实凭据管理器。CLI 的测试组合根支持仅限测试的环境变量 `DATABASE_QUERY_TEST_SOURCES`（JSON 数组，只放合成 SQLite 数据源）；`npm test` 和 `npm run check` 在独立子进程中清除该变量，默认检查从不读取真实凭据或任何配置文件。结构测试使用 TypeScript AST 约束源码类组织、每个命名方法与每个枚举成员的中文 JSDoc。
+PostgreSQL、MySQL 的连接策略、超时和清理用伪驱动验证；额外使用真实 mysql2 驱动和本机假协议端点验证底层 Socket 在超时和退出时确实销毁。凭据读写与删除用注入的伪子进程验证协议、超时与错误映射，不触碰真实凭据管理器。CLI 的测试组合根支持仅限测试的环境变量 `DATABASE_QUERY_TEST_SOURCES`（JSON 数组，只放合成 SQLite 数据源）；`npm test` 和 `npm run check` 在独立子进程中清除该变量，默认检查从不读取真实凭据或任何配置文件。结构测试使用 TypeScript AST 约束源码类组织、每个命名方法与每个枚举成员的中文 JSDoc。
 
 ## 迁移清理状态
 
@@ -169,7 +190,7 @@ database-query-cli/
 │   ├── security/SqlPolicy.ts
 │   ├── infrastructure/config/、credentials/、logging/、database/
 │   │   └── database/postgres/、mysql/、sqlite/（含隔离 worker）
-│   ├── presentation/cli/DatabaseCli.ts、cli/InitWizard.ts
+│   ├── presentation/cli/DatabaseCli.ts、cli/InitWizard.ts、cli/EditWizard.ts
 │   └── shared/errors/、results/
 ├── tests/unit/、integration/
 ├── scripts/install-hooks.mjs / run-tests.mjs

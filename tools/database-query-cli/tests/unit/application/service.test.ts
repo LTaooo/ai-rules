@@ -174,6 +174,57 @@ describe('query service', () => {
         expect(adapter.query).not.toHaveBeenCalled();
     });
 
+    describe('MySQL metadata SHOW', () => {
+        const source = new DatabaseConfig({ ...salesSource, type: Dialect.MySQL, port: 3306 });
+
+        it.each([
+            'SHOW FULL TABLES;',
+            "SHOW FULL FIELDS IN book LIKE 'name%';",
+            'SHOW INDEX FROM dcd_product_review;',
+            'SHOW CREATE TABLE dcd_product_review;',
+            "SHOW TABLE STATUS LIKE 'book%';",
+        ])('passes normalized SHOW through the adapter: %s', async (sql) => {
+            const adapter = makeAdapter();
+            const { registry } = makeRegistry([source]);
+            const service = new QueryService(
+                registry,
+                undefined,
+                () => adapter,
+                new Logger(() => undefined),
+            );
+            const result = await service.query({ database: 'sales', sql });
+            expect(result.rows).toEqual([[1]]);
+            expect(adapter.query).toHaveBeenCalledWith(sql.slice(0, -1), [], expect.anything());
+            await service.close();
+        });
+
+        it.each([
+            'SHOW PROCESSLIST',
+            'SHOW TABLES FROM other',
+            'SHOW CREATE TABLE other.book',
+            'SHOW TABLES LIKE ?',
+            'SHOW COLUMNS FROM book LIKE ?',
+            'SHOW TABLE STATUS LIKE ?',
+            'SHOW TABLES; SELECT 1',
+        ])('rejects SHOW before creating an adapter: %s', async (sql) => {
+            const adapter = makeAdapter();
+            const factory = vi.fn(() => adapter);
+            const { registry } = makeRegistry([source]);
+            const service = new QueryService(
+                registry,
+                undefined,
+                factory,
+                new Logger(() => undefined),
+            );
+            await expect(
+                service.query({ database: 'sales', sql, parameters: ['book%'] }),
+            ).rejects.toThrow(/^SQL_REJECTED$/);
+            expect(factory).not.toHaveBeenCalled();
+            expect(adapter.query).not.toHaveBeenCalled();
+            await service.close();
+        });
+    });
+
     it('binds parameters and marks truncation', async () => {
         const adapter = makeAdapter([[1], [2], [3]]);
         const { registry } = makeRegistry([salesSource]);

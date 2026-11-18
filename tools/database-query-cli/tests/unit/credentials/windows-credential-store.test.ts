@@ -105,6 +105,38 @@ describe('Windows credential store', () => {
         expect(spawnMock).toHaveBeenCalledTimes(1);
     });
 
+    it('deletes blobs through stdin and rejects foreign targets', async () => {
+        const child = new FakeChild();
+        const { store, spawnMock } = makeStore(child);
+        const pending = store.remove(`${SOURCE_TARGET_PREFIX}sales`);
+        const [, args] = spawnMock.mock.calls[0] as unknown as [string, string[]];
+        expect(args.join(' ')).not.toContain('database-query.sales');
+        expect(child.stdin.end).toHaveBeenCalledWith(`delete\n${SOURCE_TARGET_PREFIX}sales\n\n`);
+        await flush(child, 'ok:e30=');
+        await expect(pending).resolves.toBeUndefined();
+        const foreign = await failure(store.remove('other.junk'));
+        expect(foreign.code).toBe('CONFIG_ERROR');
+        expect(spawnMock).toHaveBeenCalledTimes(1);
+    });
+
+    it('maps delete failures to safe credential reasons', async () => {
+        for (const marker of ['err:1168', 'err:5', 'err:999']) {
+            const child = new FakeChild();
+            const { store } = makeStore(child);
+            const pending = store.remove(`${SOURCE_TARGET_PREFIX}sales`);
+            await flush(child, marker);
+            const error = await failure(pending);
+            if (marker === 'err:1168') {
+                expect(error.code).toBe('NOT_FOUND');
+            } else {
+                expect(error.code).toBe('CREDENTIAL_ERROR');
+                expect(error.diagnostic?.reason).toBe(
+                    marker === 'err:5' ? 'ACCESS_DENIED' : 'PLATFORM',
+                );
+            }
+        }
+    });
+
     it('lists and skips unparsable or foreign entries', async () => {
         const child = new FakeChild();
         const { store } = makeStore(child);

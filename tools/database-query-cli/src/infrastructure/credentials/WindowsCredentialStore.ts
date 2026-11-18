@@ -3,6 +3,7 @@ import { CredentialFailure } from '../../domain/enums/CredentialFailure.js';
 import { ErrorCode } from '../../domain/enums/ErrorCode.js';
 import { DatabaseConfig } from '../../domain/models/DatabaseConfig.js';
 import type { SourceRegistry } from '../../domain/ports/SourceRegistry.js';
+import type { SourceRemover } from '../../domain/ports/SourceRemover.js';
 import type { SourceWriter } from '../../domain/ports/SourceWriter.js';
 import { SourceSchema } from '../config/SourceSchema.js';
 import { SafeError } from '../../shared/errors/SafeError.js';
@@ -11,7 +12,7 @@ import type { ProcessSpawner } from './ProcessSpawner.js';
 /** 数据源凭据的统一目标名前缀，别名紧跟其后。 */
 export const SOURCE_TARGET_PREFIX = 'database-query.';
 
-export class WindowsCredentialStore implements SourceRegistry, SourceWriter {
+export class WindowsCredentialStore implements SourceRegistry, SourceWriter, SourceRemover {
     private static readonly payloadPattern = /^ok:([A-Za-z0-9+/]+={0,2})$/;
     private static readonly errorPattern = /^err:(\S+)$/;
     /** 凭据读写的常量脚本；模式、目标名与数据均从标准输入读取，argv 不含任何用户数据。 */
@@ -41,6 +42,8 @@ export class WindowsCredentialStore implements SourceRegistry, SourceWriter {
         '    public static extern bool CredReadW(string target, uint type, uint reserved, out IntPtr credential);',
         '    [DllImport("advapi32.dll", CharSet = CharSet.Unicode, SetLastError = true)]',
         '    public static extern bool CredWriteW(ref CREDENTIAL credential, uint reserved);',
+        '    [DllImport("advapi32.dll", CharSet = CharSet.Unicode, SetLastError = true)]',
+        '    public static extern bool CredDeleteW(string target, uint type, uint reserved);',
         '    [DllImport("advapi32.dll", CharSet = CharSet.Unicode, SetLastError = true)]',
         '    public static extern bool CredEnumerateW(string filter, uint reserved, out uint count, out IntPtr credentials);',
         '    [DllImport("advapi32.dll")]',
@@ -135,6 +138,15 @@ export class WindowsCredentialStore implements SourceRegistry, SourceWriter {
         '    }',
         '    exit 0',
         '}',
+        "if ($mode -eq 'delete') {",
+        '    $target = [Console]::In.ReadLine()',
+        '    if (-not [DatabaseQueryCredMan]::CredDeleteW($target, 1, 0)) {',
+        "        [Console]::Out.Write('err:' + [Runtime.InteropServices.Marshal]::GetLastWin32Error())",
+        '        exit 0',
+        '    }',
+        "    [Console]::Out.Write('ok:e30=')",
+        '    exit 0',
+        '}',
         "    [Console]::Out.Write('err:BADMODE')",
         '    exit 0',
     ].join('\n');
@@ -197,18 +209,37 @@ export class WindowsCredentialStore implements SourceRegistry, SourceWriter {
      * @param payload 数据源完整配置的 JSON 文本。
      */
     public async write(target: string, payload: string): Promise<void> {
+        this.validateTarget(target);
+        await this.request('write', target, Buffer.from(payload, 'utf8').toString('base64'));
+    }
+
+    /**
+     * 删除指定数据源凭据；目标不存在时转换为 NotFound，便于重命名按幂等处理。
+     * @param target 数据源凭据目标名，必须使用仓库前缀。
+     */
+    public async remove(target: string): Promise<void> {
+        this.validateTarget(target);
+        try {
+            await this.request('delete', target);
+        } catch (error) {
+            if (this.isNotFound(error)) throw new SafeError(ErrorCode.NotFound);
+            throw error;
+        }
+    }
+
+    /** 校验目标名带仓库前缀且别名合法，防止读写或删除其他应用的凭据。 */
+    private validateTarget(target: string): void {
         if (
             !target.startsWith(SOURCE_TARGET_PREFIX) ||
             !SourceSchema.namePattern.test(target.slice(SOURCE_TARGET_PREFIX.length))
         ) {
             throw new SafeError(ErrorCode.ConfigError);
         }
-        await this.request('write', target, Buffer.from(payload, 'utf8').toString('base64'));
     }
 
     /** 以带标签单通道协议与 PowerShell 子进程通信，模式与数据全部经标准输入传递。 */
     private async request(
-        mode: 'read' | 'write' | 'list',
+        mode: 'read' | 'write' | 'list' | 'delete',
         target: string,
         payload?: string,
     ): Promise<string> {

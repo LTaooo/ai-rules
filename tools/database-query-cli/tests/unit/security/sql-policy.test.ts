@@ -74,7 +74,6 @@ describe('SQL policy', () => {
             'PRAGMA query_only = OFF',
             "ATTACH DATABASE 'other.db' AS other",
             'VACUUM',
-            'SHOW TABLES',
             'EXPLAIN ANALYZE SELECT 1',
             'SELECT @secret := 1',
             'SELECT CAST(1 AS evil_type)',
@@ -86,6 +85,145 @@ describe('SQL policy', () => {
             expect(() => SqlPolicy.validateSql(sql, dialect)).toThrow();
         });
     }
+
+    describe('MySQL metadata SHOW', () => {
+        const allowed = [
+            'SHOW TABLES',
+            'SHOW FULL TABLES',
+            "SHOW TABLES LIKE 'book%'",
+            "SHOW FULL TABLES LIKE 'book_'",
+            "SHOW TABLES LIKE ''",
+            "SHOW TABLES LIKE 'a''b%'",
+            "SHOW TABLES LIKE '; DROP TABLE users -- /* */ WHERE'",
+            'SHOW COLUMNS FROM book',
+            'SHOW COLUMNS IN book',
+            'SHOW FIELDS FROM book',
+            'SHOW FIELDS IN book',
+            'SHOW FULL COLUMNS FROM book',
+            'SHOW FULL FIELDS IN book',
+            "SHOW COLUMNS FROM book LIKE 'id'",
+            "SHOW FULL FIELDS IN book LIKE 'name%'",
+            'SHOW INDEX FROM book',
+            'SHOW INDEX IN book',
+            'SHOW INDEXES FROM book',
+            'SHOW INDEXES IN book',
+            'SHOW KEYS FROM book',
+            'SHOW KEYS IN book',
+            'SHOW CREATE TABLE book',
+            'SHOW CREATE TABLE dcd_product_review',
+            'SHOW INDEX FROM dcd_product_review',
+            'SHOW CREATE TABLE `book name`',
+            'SHOW COLUMNS FROM `book``name`',
+            'SHOW INDEX FROM `book;--name`',
+            'SHOW CREATE TABLE _book$1',
+            'SHOW TABLE STATUS',
+            "SHOW TABLE STATUS LIKE 'book%'",
+            "SHOW TABLE STATUS LIKE 'a''b%'",
+            'show full columns in `Book`',
+            "SHOW\tFULL\nTABLES\r\nLIKE\t'book%'",
+        ];
+
+        it.each(allowed)('allows MySQL: %s', (sql) => {
+            expect(SqlPolicy.validateSql(sql, Dialect.MySQL)).toBe(sql);
+        });
+
+        for (const dialect of [Dialect.PostgreSQL, Dialect.SQLite]) {
+            it.each(allowed)(`rejects ${dialect}: %s`, (sql) => {
+                expect(() => SqlPolicy.validateSql(sql, dialect)).toThrow(/^SQL_REJECTED$/);
+            });
+        }
+
+        it.each([
+            'SHOW CREATE TABLE dcd_product_review;',
+            'SHOW INDEX FROM dcd_product_review;',
+            ' \nSHOW FULL TABLES; \n',
+        ])('normalizes a single trailing semicolon: %s', (sql) => {
+            expect(SqlPolicy.validateSql(sql, Dialect.MySQL)).toBe(
+                sql.trim().replace(/;$/, '').trim(),
+            );
+        });
+
+        it.each([
+            'SHOW DATABASES',
+            'SHOW SCHEMAS',
+            'SHOW PROCESSLIST',
+            'SHOW FULL PROCESSLIST',
+            'SHOW GRANTS',
+            "SHOW CREATE USER 'reader'@'localhost'",
+            'SHOW CREATE VIEW book',
+            'SHOW VARIABLES',
+            'SHOW GLOBAL VARIABLES',
+            'SHOW SESSION VARIABLES',
+            'SHOW STATUS',
+            "SHOW GLOBAL STATUS LIKE 'Threads%'",
+            'SHOW ENGINE INNODB STATUS',
+            'SHOW WARNINGS',
+            'SHOW ERRORS',
+            'SHOW BINARY LOGS',
+            'SHOW BINLOG EVENTS',
+            'SHOW RELAYLOG EVENTS',
+            'SHOW MASTER STATUS',
+            'SHOW SLAVE STATUS',
+            'SHOW REPLICA STATUS',
+            'SHOW CHARACTER SET',
+            'SHOW COLLATION',
+            'SHOW TABLES FROM other',
+            'SHOW FULL TABLES IN other',
+            "SHOW TABLES IN `other` LIKE 'book%'",
+            'SHOW COLUMNS FROM other.book',
+            'SHOW COLUMNS FROM `other`.`book`',
+            'SHOW FIELDS IN book FROM other',
+            'SHOW COLUMNS FROM book IN other',
+            'SHOW INDEX FROM other.book',
+            'SHOW INDEXES FROM book FROM other',
+            'SHOW KEYS IN book IN other',
+            'SHOW CREATE TABLE other.book',
+            'SHOW CREATE TABLE `other`.`book`',
+            'SHOW TABLE STATUS FROM other',
+            "SHOW TABLE STATUS IN other LIKE 'book%'",
+            'SHOW TABLES WHERE SLEEP(1) = 0',
+            "SHOW COLUMNS FROM book WHERE Field = 'id'",
+            'SHOW INDEX FROM book WHERE Non_unique = 0',
+            "SHOW TABLE STATUS WHERE Name = 'book'",
+            'SHOW TABLES LIKE ?',
+            'SHOW COLUMNS FROM book LIKE ?',
+            'SHOW TABLE STATUS LIKE ?',
+            'SHOW TABLES LIKE @pattern',
+            "SHOW TABLES LIKE CONCAT('book', '%')",
+            'SHOW TABLES LIKE 1',
+            "SHOW TABLES LIKE 'book%' ESCAPE '!'",
+            "SHOW TABLES LIKE 'book%' OR SLEEP(1)",
+            'SHOW CREATE TABLE ?',
+            'SHOW CREATE TABLE "book"',
+            "SHOW CREATE TABLE 'book'",
+            'SHOW CREATE TABLE ``',
+            'SHOW CREATE TABLE book AS b',
+            'SHOW FULL INDEX FROM book',
+            'SHOW FULL TABLE STATUS',
+            'SHOW CREATE TABLE book LIKE book',
+            'SHOW TABLES unexpected',
+            'SHOWTABLES',
+            `SHOW${String.fromCharCode(160)}TABLES LIKE 'book%'`,
+            'SHOW TABLES; SHOW COLUMNS FROM book',
+            'SHOW CREATE TABLE book; DROP TABLE book',
+            'SHOW TABLES;;',
+            'SHOW /* comment */ TABLES',
+            'SHOW TABLES -- comment',
+            'SHOW TABLES # comment',
+            "SHOW TABLES LIKE 'book\\%'",
+            "SHOW TABLES LIKE 'unterminated",
+            'SHOW CREATE TABLE `unterminated',
+            'SHOW TABLES\0',
+        ])('rejects unsupported or unsafe MySQL SHOW: %s', (sql) => {
+            expect(() => SqlPolicy.validateSql(sql, Dialect.MySQL)).toThrow(/^SQL_REJECTED$/);
+        });
+
+        it('retains the SQL size limit for SHOW literals', () => {
+            expect(() =>
+                SqlPolicy.validateSql(`SHOW TABLES LIKE '${'a'.repeat(65536)}'`, Dialect.MySQL),
+            ).toThrow(/^SQL_REJECTED$/);
+        });
+    });
 
     it('supports native parameter placeholders', () => {
         expect(SqlPolicy.validateSql('SELECT $1 AS value', Dialect.PostgreSQL)).toBeTruthy();
