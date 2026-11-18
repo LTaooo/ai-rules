@@ -74,26 +74,25 @@ vi.mock('mysql2', async () => {
                     promise: ReturnType<typeof vi.fn>;
                     execute: ReturnType<typeof vi.fn>;
                     destroy: ReturnType<typeof vi.fn>;
+                    controls: ReturnType<typeof vi.fn>;
                 };
+                connection.controls = vi.fn((sql: string) => {
+                    if (mocks.mode === 'timeout-setup-fail' && sql.includes('MAX_EXECUTION_TIME'))
+                        return Promise.reject({ code: 'ER_UNKNOWN_SYSTEM_VARIABLE' });
+                    if (
+                        mocks.mode === 'readonly-fail' &&
+                        sql === 'SET SESSION TRANSACTION READ ONLY'
+                    )
+                        return Promise.reject({ code: 'ER_NOT_SUPPORTED_YET' });
+                    if (sql === 'SELECT VERSION()' && mocks.mode === 'version-hang')
+                        return new Promise(() => {});
+                    return sql === 'SELECT VERSION()'
+                        ? Promise.resolve([[[mocks.mysqlVersion]], []])
+                        : Promise.resolve([[], []]);
+                });
                 connection.promise = vi.fn(() => ({
                     connect: vi.fn().mockResolvedValue(undefined),
-                    query: vi.fn((sql: string) => {
-                        if (
-                            mocks.mode === 'timeout-setup-fail' &&
-                            sql.includes('MAX_EXECUTION_TIME')
-                        )
-                            return Promise.reject({ code: 'ER_UNKNOWN_SYSTEM_VARIABLE' });
-                        if (
-                            mocks.mode === 'readonly-fail' &&
-                            sql === 'SET SESSION TRANSACTION READ ONLY'
-                        )
-                            return Promise.reject({ code: 'ER_NOT_SUPPORTED_YET' });
-                        if (sql === 'SELECT VERSION()' && mocks.mode === 'version-hang')
-                            return new Promise(() => {});
-                        return sql === 'SELECT VERSION()'
-                            ? Promise.resolve([[[mocks.mysqlVersion]], []])
-                            : Promise.resolve([[], []]);
-                    }),
+                    query: connection.controls,
                 }));
                 connection.destroy = vi.fn();
                 connection.execute = vi.fn(() => {
@@ -182,6 +181,36 @@ describe('remote adapters with fake drivers', () => {
             await adapter.close();
         }
     });
+    it.each([
+        'SHOW FULL TABLES',
+        "SHOW FULL FIELDS IN book LIKE 'name%'",
+        'SHOW INDEX FROM book',
+        'SHOW CREATE TABLE book',
+        "SHOW TABLE STATUS LIKE 'book%'",
+    ])('uses prepared execution and read-only controls for %s', async (sql) => {
+        const adapter = new MysqlAdapter(sourceUrl('mysql://reader:fake@localhost/db'));
+        await adapter.query(sql, [], limits());
+        const connection = mocks.mysqlConnections[0] as {
+            execute: ReturnType<typeof vi.fn>;
+            controls: ReturnType<typeof vi.fn>;
+            destroy: ReturnType<typeof vi.fn>;
+        };
+        expect(connection.execute).toHaveBeenCalledExactlyOnceWith(sql, []);
+        expect(connection.controls.mock.calls.map(([statement]) => statement)).toEqual([
+            'SELECT VERSION()',
+            'SET SESSION TRANSACTION READ ONLY',
+            'SET SESSION MAX_EXECUTION_TIME = 20000',
+            'START TRANSACTION READ ONLY',
+            'ROLLBACK',
+        ]);
+        expect(mocks.mysqlOptions[0]).toMatchObject({
+            database: 'db',
+            multipleStatements: false,
+        });
+        expect(connection.destroy).toHaveBeenCalled();
+        await adapter.close();
+    });
+
     it('refuses PostgreSQL when read-only protection was not established', async () => {
         mocks.mode = 'unsafe';
         const adapter = new PostgresAdapter(sourceUrl('postgresql://reader:fake@localhost/db'));

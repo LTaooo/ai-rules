@@ -50,6 +50,22 @@ node "$cli" --help
 
 成功结果在 stdout，查询结果为含 `columns` 和二维 `rows` 的 JSON；不要按列名转对象而丢失重复列。大整数和精确小数可能以字符串返回，不随意转为浮点数。回复只包含用户所需的最少数据和结论，不额外保存原始结果。
 
+## MySQL 表结构与索引
+
+需要完整建表定义、索引或表统计信息时，通过 `query` 执行以下单条 SHOW；MySQL 与 MariaDB 均适用，PostgreSQL 和 SQLite 不使用这些语句：
+
+```sql
+SHOW [FULL] TABLES [LIKE 'pattern']
+SHOW [FULL] {COLUMNS | FIELDS} {FROM | IN} table [LIKE 'pattern']
+SHOW {INDEX | INDEXES | KEYS} {FROM | IN} table
+SHOW CREATE TABLE table
+SHOW TABLE STATUS [LIKE 'pattern']
+```
+
+方括号表示可选，`|` 表示关键词选项，不写入实际 SQL。表名用单段标识符或反引号标识符；不写库名前缀或额外的 `FROM db` / `IN db`，即使与当前库同名也不使用。LIKE 仅接受单引号字面量，内部单引号用双单引号转义；不使用 `LIKE ?`、WHERE、函数、变量或其他子句。动态结构过滤使用 `describe --table-like`，不要拼接不可信输入。
+
+例如 `SHOW CREATE TABLE book;` 和 `SHOW INDEX FROM book;` 分别执行，不放进同一次查询。未列出的 SHOW 不执行，尤其是账户、权限、进程、配置、引擎诊断与复制日志类。表定义、默认值和注释仍可能含敏感业务信息，只返回本次任务必要内容。SQL SHOW 与用于查看数据源标识的 CLI `show --database` 不同。
+
 ## 失败与安全底线
 
 - 非零退出或 stderr 安全错误码表示失败；只报告错误码及必要上下文，不输出驱动原始异常。

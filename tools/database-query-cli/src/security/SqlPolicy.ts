@@ -131,6 +131,21 @@ const deniedTypes = new Set([
 /** 值非空即表示锁定读取或 RETURNING 子句的键；二者只属于写入与锁场景。 */
 const deniedValueKeys = ['for_update', 'locking_read', 'returning'];
 
+/** SHOW 仅匹配当前库的结构元数据语法，不接受库限定名、表达式或未消费的尾随内容。 */
+const showSpace = '[ \\t\\r\\n\\f\\v]+';
+const showIdentifier = '(?:[A-Za-z_$][A-Za-z0-9_$]*|`(?:[^`]|``)+`)';
+const showLike = `(?:${showSpace}LIKE${showSpace}'(?:[^']|'')*')?`;
+const allowedMysqlShow = new RegExp(
+    `^SHOW${showSpace}(?:${[
+        `(?:FULL${showSpace})?TABLES${showLike}`,
+        `(?:FULL${showSpace})?(?:COLUMNS|FIELDS)${showSpace}(?:FROM|IN)${showSpace}${showIdentifier}${showLike}`,
+        `(?:INDEX|INDEXES|KEYS)${showSpace}(?:FROM|IN)${showSpace}${showIdentifier}`,
+        `CREATE${showSpace}TABLE${showSpace}${showIdentifier}`,
+        `TABLE${showSpace}STATUS${showLike}`,
+    ].join('|')})(?![\\s\\S])`,
+    'i',
+);
+
 export class SqlPolicy {
     /** 终止不可信 SQL 的验证，仅抛出不包含 SQL 的安全错误。 */
     private static reject(): never {
@@ -257,14 +272,18 @@ export class SqlPolicy {
     }
 
     /**
-     * 以词法检查、SELECT 语句类型和危险黑名单验证单条只读语句；写入与注入面形状拒绝，
-     * 其余语法交给数据库解释，由只读账户、只读事务和执行超时兜底。
+     * 以词法检查、受限 MySQL SHOW 语法及 SELECT AST 验证单条只读语句；
+     * SELECT 的写入与注入面形状拒绝，其余语法由只读账户、只读事务和执行超时兜底。
      * @param dialect 数据源方言，决定 AST 校验规则。
      * @returns 规范化后的 SQL 文本（去除尾部分号）。
      */
     public static validateSql(sql: string, dialect: Dialect): string {
         try {
             const clean = SqlPolicy.checkLexical(sql);
+            if (/^SHOW\b/i.test(clean)) {
+                if (dialect !== Dialect.MySQL || !allowedMysqlShow.test(clean)) SqlPolicy.reject();
+                return clean;
+            }
             const parsed: unknown = parser.astify(clean, {
                 database: { sqlite: 'SQLite', postgres: 'Postgresql', mysql: 'MySQL' }[dialect],
             });

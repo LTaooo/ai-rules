@@ -37,9 +37,9 @@ CLI 目前是新增实现；使用前执行 `npm run check`，并用独立 SQLit
 ## 能力与边界
 
 - 子命令覆盖数据源列表、结构查询与只读业务查询，详见快速开始与 `--help`。
-- 通用 SQL 仅接受单条 SELECT 与纯查询 WITH、UNION 组合；函数、操作符、窗口等其余语法不设许可清单。
+- 通用 SQL 接受单条 SELECT 与纯查询 WITH、UNION 组合；MySQL 另支持当前库的表结构、索引与表统计类 SHOW，具体语法见下文。SELECT 的函数、操作符、窗口等其余语法不设许可清单。
 - 拒绝写入、删除、DDL、事务管理、多语句、注释、锁定读取（FOR UPDATE、LOCK IN SHARE MODE）、递归 CTE（WITH RECURSIVE）、输出文件、会话变量赋值和危险函数（文件读取、休眠、加锁、后端控制、序列推进、扩展加载、dblink）。
-- 使用词法检查、SELECT 语句类型白名单与危险黑名单校验，配合数据库只读保护和最小权限账户；可解析的未知语法交给数据库解释，由只读层兜底，解析不了的语法返回 `SQL_REJECTED`。
+- 使用统一词法检查、受限 MySQL SHOW 语法完整匹配、SELECT AST 类型与危险黑名单校验，配合数据库只读保护和最小权限账户。SHOW 在通用解析器前独立校验，不接受许可语法之外的子句；SELECT 可解析的未知语法交给数据库解释，由只读层兜底，解析不了的语法返回 `SQL_REJECTED`。
 - 默认最多返回 1000 行、20 秒执行时间、3 MiB 响应，每个数据源最多 4 个并发请求。
 - 数据源描述、地址、用户名和凭据目标名保存于凭据条目；远程数据库密码只存 Windows 凭据管理器，JSON 不含明文密码。不接入云凭据管理，不使用 `.agentsignore`。
 - 运行日志使用 JSON Lines 写入 stderr，记录启动、停止、请求状态、耗时、行数、截断标识和安全错误码；不记录 SQL、参数、连接串、凭证或查询数据。
@@ -94,6 +94,24 @@ node dist/cli.js init
 `describe --database sales --schema public --table orders`，模糊过滤用 `--table-like 'order%'`。
 
 `table` 精确匹配；`tableLike` 模糊过滤——不含 `%` 时按包含匹配（`*`、`?` 自动转译为通配符），含 `%` 时按 SQL LIKE 原样使用。两者互斥；无过滤且结果被截断时返回 `RESULT_TOO_LARGE`。返回统一的列信息查询结果，列包括 `schema_name`、`table_name`、`table_type`、`column_name`、`data_type`、`nullable`、`primary_key`。可不填 table，查询可见结构；PostgreSQL 默认 public。SQLite 不接受 schema，MySQL 的 schema 只能是当前配置数据库。
+
+### MySQL 元数据 SHOW
+
+通过 `query` 执行以下单条 SQL；MySQL 与 MariaDB 使用相同范围，PostgreSQL 和 SQLite 不支持这些 SHOW。方括号表示可选部分，`|` 表示关键词选项，不是实际 SQL 字符：
+
+```sql
+SHOW [FULL] TABLES [LIKE 'pattern']
+SHOW [FULL] {COLUMNS | FIELDS} {FROM | IN} table [LIKE 'pattern']
+SHOW {INDEX | INDEXES | KEYS} {FROM | IN} table
+SHOW CREATE TABLE table
+SHOW TABLE STATUS [LIKE 'pattern']
+```
+
+例如 `SHOW CREATE TABLE book;`、`SHOW INDEX FROM book;`、`SHOW FULL TABLES LIKE 'book%';`。关键词不区分大小写；表名仅接受单段未引用标识符或反引号标识符，反引号内用双反引号转义。所有显式库限定均拒绝，包括 `db.book`、额外的 `FROM db` / `IN db`；查询目标始终是数据源配置的当前数据库。
+
+LIKE 只接受单引号字面量，内部单引号用双单引号转义；不支持 `LIKE ?`、反斜杠、WHERE、变量、函数或其他额外子句。动态结构过滤使用 `describe --table-like`，不要拼接不可信输入。执行仍使用参数化驱动接口、只读事务与相同的行数、字节及超时限制，不降级为文本插值查询。
+
+未列出的 SHOW 均返回 `SQL_REJECTED`，包括 DATABASES、PROCESSLIST、GRANTS、CREATE USER、VARIABLES、STATUS、ENGINE 与复制日志类。表定义、默认值、注释及表选项仍可能包含敏感业务信息；支持元数据查询不代表输出天然不敏感。CLI 的 `show --database` 仅用于查看数据源业务标识，与 SQL SHOW 是两个不同入口。
 
 ### 业务查询
 
