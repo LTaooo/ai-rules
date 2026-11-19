@@ -37,13 +37,25 @@ function Test-SymlinkCapable {
     }
 }
 
+function ConvertTo-ComparablePath([string]$Path) {
+    if ([string]::IsNullOrWhiteSpace($Path)) { return '' }
+    $value = $Path.Trim()
+    foreach ($prefix in '\??\', '\\?\', 'Global\') {
+        if ($value.StartsWith($prefix, [StringComparison]::OrdinalIgnoreCase)) {
+            $value = $value.Substring($prefix.Length)
+            break
+        }
+    }
+    try { return [IO.Path]::GetFullPath($value) } catch { return '' }
+}
+
 function Test-EntryLinkCorrect([string]$SourcePath, [string]$DestinationPath) {
     $info = $null
     try { $info = Get-Item -LiteralPath $DestinationPath -Force -ErrorAction Stop } catch { return $false }
     if ($info.PSIsContainer -or -not ($info.Attributes -band [IO.FileAttributes]::ReparsePoint)) { return $false }
-    $current = [string]@($info.Target)[0]
-    if ([string]::IsNullOrWhiteSpace($current)) { return $false }
-    return [IO.Path]::GetFullPath($current).Equals([IO.Path]::GetFullPath($SourcePath), [StringComparison]::OrdinalIgnoreCase)
+    $current = ConvertTo-ComparablePath ([string]@($info.Target)[0])
+    if ([string]::IsNullOrEmpty($current)) { return $false }
+    return $current.Equals([IO.Path]::GetFullPath($SourcePath), [StringComparison]::OrdinalIgnoreCase)
 }
 
 function Update-EntryLink([string]$SourcePath, [string]$DestinationPath, [string]$BackupName, [string]$BackupRoot) {
@@ -59,8 +71,8 @@ function Update-EntryLink([string]$SourcePath, [string]$DestinationPath, [string
     if ($null -ne $info) {
         if ($info.PSIsContainer) { throw "入口路径是目录，拒绝处理：$DestinationPath" }
         if ($info.Attributes -band [IO.FileAttributes]::ReparsePoint) {
-            $current = [string]@($info.Target)[0]
-            if (-not [string]::IsNullOrWhiteSpace($current) -and [IO.Path]::GetFullPath($current).Equals($expected, [StringComparison]::OrdinalIgnoreCase)) {
+            $current = ConvertTo-ComparablePath ([string]@($info.Target)[0])
+            if ($current.Equals($expected, [StringComparison]::OrdinalIgnoreCase)) {
                 Write-Host "跳过（映射正确）：$DestinationPath"
                 return
             }
@@ -95,14 +107,14 @@ function Update-EntryLink([string]$SourcePath, [string]$DestinationPath, [string
     }
 
     $created = Get-Item -LiteralPath $DestinationPath -Force
-    $createdTarget = [string]@($created.Target)[0]
-    if ([string]::IsNullOrWhiteSpace($createdTarget) -or -not [IO.Path]::GetFullPath($createdTarget).Equals($expected, [StringComparison]::OrdinalIgnoreCase)) {
+    $createdTarget = ConvertTo-ComparablePath ([string]@($created.Target)[0])
+    if ([string]::IsNullOrEmpty($createdTarget) -or -not $createdTarget.Equals($expected, [StringComparison]::OrdinalIgnoreCase)) {
         throw "映射创建后校验失败：$DestinationPath"
     }
     Write-Host "已创建映射：$DestinationPath -> $expected"
 }
 
-function Update-SkillJunctions([string]$RepoSkillsRoot, [string]$ToolSkillsRoot) {
+function Update-SkillJunctions([string]$RepoSkillsRoot, [string]$ToolSkillsRoot, [switch]$PreserveForeignLinks) {
     $failures = [Collections.Generic.List[string]]::new()
 
     $toolItem = Get-Item -LiteralPath $ToolSkillsRoot -Force -ErrorAction SilentlyContinue
@@ -126,6 +138,8 @@ function Update-SkillJunctions([string]$RepoSkillsRoot, [string]$ToolSkillsRoot)
         $managed[$repoItem.Name] = [IO.Path]::GetFullPath($repoItem.FullName)
     }
 
+    $repoPrefix = [IO.Path]::GetFullPath($RepoSkillsRoot).TrimEnd('\', '/') + '\'
+
     foreach ($name in $managed.Keys) {
         $expected = $managed[$name]
         $link = Join-Path $ToolSkillsRoot $name
@@ -144,9 +158,13 @@ function Update-SkillJunctions([string]$RepoSkillsRoot, [string]$ToolSkillsRoot)
                 }
             }
             elseif ($info.Attributes -band [IO.FileAttributes]::ReparsePoint) {
-                $current = [string]@($info.Target)[0]
-                if (-not [string]::IsNullOrWhiteSpace($current) -and [IO.Path]::GetFullPath($current).Equals($expected, [StringComparison]::OrdinalIgnoreCase)) {
+                $rawTarget = [string]@($info.Target)[0]
+                $current = ConvertTo-ComparablePath $rawTarget
+                if ($current.Equals($expected, [StringComparison]::OrdinalIgnoreCase)) {
                     Write-Host "跳过（联接正确）：$link"
+                }
+                elseif ($PreserveForeignLinks -and -not $current.StartsWith($repoPrefix, [StringComparison]::OrdinalIgnoreCase)) {
+                    $failures.Add("已存在同名联接但指向仓库外位置，跳过不覆盖，请人工核对来源后处理：$link -> $rawTarget")
                 }
                 else {
                     Remove-Item -LiteralPath $link -Force -Recurse
@@ -155,7 +173,7 @@ function Update-SkillJunctions([string]$RepoSkillsRoot, [string]$ToolSkillsRoot)
                 }
             }
             else {
-                Write-Warning "目标为真实文件或目录，跳过不覆盖，请手动处理：$link"
+                $failures.Add("已存在同名真实文件或目录，跳过不覆盖，请人工核对来源后处理：$link")
             }
         }
         catch {
@@ -163,7 +181,6 @@ function Update-SkillJunctions([string]$RepoSkillsRoot, [string]$ToolSkillsRoot)
         }
     }
 
-    $repoPrefix = [IO.Path]::GetFullPath($RepoSkillsRoot).TrimEnd('\', '/') + '\'
     foreach ($entry in [IO.Directory]::GetFileSystemEntries($ToolSkillsRoot)) {
         $entryName = [IO.Path]::GetFileName($entry)
         if ($managed.ContainsKey($entryName)) { continue }
@@ -174,8 +191,8 @@ function Update-SkillJunctions([string]$RepoSkillsRoot, [string]$ToolSkillsRoot)
             continue
         }
         if ($entryInfo.Attributes -band [IO.FileAttributes]::ReparsePoint) {
-            $target = [string]@($entryInfo.Target)[0]
-            if (-not [string]::IsNullOrWhiteSpace($target) -and [IO.Path]::GetFullPath($target).StartsWith($repoPrefix, [StringComparison]::OrdinalIgnoreCase)) {
+            $target = ConvertTo-ComparablePath ([string]@($entryInfo.Target)[0])
+            if ($target.StartsWith($repoPrefix, [StringComparison]::OrdinalIgnoreCase)) {
                 Write-Warning "指向仓库但已不在技能清单中的联接，请手动删除：$entry -> $target"
             }
         }
@@ -254,6 +271,7 @@ try {
     $junctionFailures = [Collections.Generic.List[string]]::new()
     foreach ($failure in (Update-SkillJunctions (Join-Path $PSScriptRoot 'skills') (Join-Path $UserHome '.claude\skills'))) { $junctionFailures.Add($failure) }
     foreach ($failure in (Update-SkillJunctions (Join-Path $PSScriptRoot 'skills') (Join-Path $UserHome '.codex\skills'))) { $junctionFailures.Add($failure) }
+    foreach ($failure in (Update-SkillJunctions (Join-Path $PSScriptRoot 'skills') (Join-Path $UserHome '.agents\skills') -PreserveForeignLinks)) { $junctionFailures.Add($failure) }
     foreach ($failure in $junctionFailures) { $failures.Add($failure) }
 
     if ($failures.Count -gt 0) {
