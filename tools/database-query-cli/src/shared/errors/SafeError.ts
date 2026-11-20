@@ -2,6 +2,9 @@ import type { CredentialFailure } from '../../domain/enums/CredentialFailure.js'
 import type { DatabaseStage } from '../../domain/enums/DatabaseStage.js';
 import { ErrorCode } from '../../domain/enums/ErrorCode.js';
 
+type SqlRejectionReason = 'lexical_rejected' | 'parse_failed' | 'policy_denied' | 'unknown';
+type SqlLocation = { line: number; column: number };
+
 export class SafeError extends Error {
     /** 以错误码作为消息主体初始化，异常文本不携带任何上下文细节。 */
     constructor(public readonly code: ErrorCode) {
@@ -10,6 +13,25 @@ export class SafeError extends Error {
     }
 
     public diagnostic?: { stage?: DatabaseStage; reason: string };
+    private sqlRejection?: { reason: SqlRejectionReason; location?: SqlLocation };
+
+    /** 只公开错误码和已脱敏的诊断字段，不序列化异常对象。 */
+    public toResponse() {
+        const rejection = this.sqlRejection;
+        return {
+            code: this.code,
+            ...(rejection && rejection.reason !== 'unknown'
+                ? { reason: rejection.reason, ...rejection.location }
+                : {}),
+            ...(this.diagnostic === undefined ? {} : { diagnostic: this.diagnostic }),
+        };
+    }
+
+    public static sql(reason: SqlRejectionReason, location?: SqlLocation): SafeError {
+        const error = new SafeError(ErrorCode.SqlRejected);
+        error.sqlRejection = location === undefined ? { reason } : { reason, location };
+        return error;
+    }
 
     /**
      * 将驱动异常转换为固定白名单诊断，不保留原始消息或连接信息。

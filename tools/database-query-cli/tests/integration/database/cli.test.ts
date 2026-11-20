@@ -1,8 +1,20 @@
-import { spawnSync } from 'node:child_process';
+import { spawnSync, type SpawnSyncReturns } from 'node:child_process';
 import { DatabaseSync } from 'node:sqlite';
 import { mkdirSync, mkdtempSync, rmSync } from 'node:fs';
 import { resolve } from 'node:path';
 import { expect, it } from 'vitest';
+
+function readResult(run: SpawnSyncReturns<string>, ok: boolean): unknown {
+    expect(run.status).toBe(ok ? 0 : 1);
+    expect(ok ? run.stderr : run.stdout).toBe('');
+    const lines = (ok ? run.stdout : run.stderr).split('\n');
+    expect(lines).toHaveLength(2);
+    expect(lines[1]).toBe('');
+    const response = JSON.parse(lines[0]!);
+    expect(Object.keys(response).sort()).toEqual(['ok', 'result']);
+    expect(response.ok).toBe(ok);
+    return response.result;
+}
 
 it('runs compiled CLI list, describe, count and rejects writes against injected test sources', () => {
     mkdirSync('.test-artifacts', { recursive: true });
@@ -25,47 +37,43 @@ it('runs compiled CLI list, describe, count and rejects writes against injected 
                 timeout: 15000,
                 env,
             });
-        const list = run(['list']);
-        expect(list.status).toBe(0);
-        expect(JSON.parse(list.stdout)).toEqual([
+        expect(readResult(run(['list']), true)).toEqual([
             { name: 'local', type: 'sqlite', description: 'Synthetic fixture' },
         ]);
         const schema = run(['describe', '--database', 'local', '--table', 'book']);
-        expect(schema.status).toBe(0);
-        expect(JSON.parse(schema.stdout).columns).toContain('column_name');
+        expect(readResult(schema, true)).toMatchObject({
+            columns: expect.arrayContaining(['column_name']),
+        });
         const count = run(['query', '--database', 'local'], 'SELECT COUNT(*) AS total FROM book');
-        expect(count.status).toBe(0);
-        expect(JSON.parse(count.stdout).rows).toEqual([['2']]);
+        expect(readResult(count, true)).toMatchObject({ rows: [['2']], truncated: false });
+        const limited = run(
+            ['query', '--database', 'local', '--max-rows', '1'],
+            'SELECT id FROM book ORDER BY id',
+        );
+        expect(readResult(limited, true)).toMatchObject({ rowCount: 1, truncated: true });
         const rejected = run(['query', '--database', 'local'], 'DELETE FROM book');
-        expect(rejected.status).toBe(1);
-        expect(rejected.stderr.trim()).toBe('SQL_REJECTED');
-        expect(rejected.stdout).toBe('');
+        expect(readResult(rejected, false)).toMatchObject({
+            code: 'SQL_REJECTED',
+            reason: 'policy_denied',
+        });
         const shown = run(['show', '--database', 'local']);
-        expect(shown.status).toBe(0);
-        const shownSource = JSON.parse(shown.stdout);
-        expect(shownSource.filename).toBe(filename);
+        expect(readResult(shown, true)).toMatchObject({ filename });
         expect(shown.stdout).not.toContain('password');
-        const filtered = run(['describe', '--database', 'local', '--table-like', 'boo%']);
-        expect(filtered.status).toBe(0);
-        expect(JSON.parse(filtered.stdout).rowCount).toBeGreaterThan(0);
-        const globbed = run(['describe', '--database', 'local', '--table-like', 'boo*']);
-        expect(globbed.status).toBe(0);
-        expect(JSON.parse(globbed.stdout).rowCount).toBeGreaterThan(0);
-        const contains = run(['describe', '--database', 'local', '--table-like', 'book']);
-        expect(contains.status).toBe(0);
-        expect(JSON.parse(contains.stdout).rowCount).toBeGreaterThan(0);
+        for (const pattern of ['boo%', 'boo*', 'book']) {
+            const filtered = run(['describe', '--database', 'local', '--table-like', pattern]);
+            expect(readResult(filtered, true)).toMatchObject({ rowCount: 1 });
+        }
         const inline = run(
             ['query', '--database', 'local', '--parameters', '[1]'],
             'SELECT id FROM book WHERE id = ?',
         );
-        expect(inline.status).toBe(0);
-        expect(JSON.parse(inline.stdout).rows).toEqual([['1']]);
+        expect(readResult(inline, true)).toMatchObject({ rows: [['1']] });
         const conflicting = run(
             ['query', '--database', 'local', '--parameters', '[1]', '--parameters-file', 'p.json'],
             'SELECT 1',
         );
         expect(conflicting.status).toBe(1);
-        expect(conflicting.stderr.trim()).toBe('INVALID_REQUEST');
+        expect(conflicting.stderr).toMatch(/"code":"INVALID_REQUEST"/);
         const conflictingWithSql = run(
             [
                 'query',
@@ -81,13 +89,13 @@ it('runs compiled CLI list, describe, count and rejects writes against injected 
             'SELECT 1',
         );
         expect(conflictingWithSql.status).toBe(1);
-        expect(conflictingWithSql.stderr.trim()).toBe('INVALID_REQUEST');
+        expect(conflictingWithSql.stderr).toMatch(/"code":"INVALID_REQUEST"/);
         const bothStdin = run(
             ['query', '--database', 'local', '--sql-file', '-', '--parameters-file', '-'],
             'SELECT 1',
         );
         expect(bothStdin.status).toBe(1);
-        expect(bothStdin.stderr.trim()).toBe('INVALID_REQUEST');
+        expect(bothStdin.stderr).toMatch(/"code":"INVALID_REQUEST"/);
     } finally {
         rmSync(folder, { recursive: true, force: true });
     }
@@ -111,14 +119,14 @@ it('rejects non-interactive init and edit and lists both in help', () => {
             timeout: 15000,
         });
         expect(run.status).toBe(1);
-        expect(run.stderr.trim()).toBe('INVALID_REQUEST');
+        expect(run.stderr).toMatch(/"code":"INVALID_REQUEST"/);
         const edit = spawnSync(process.execPath, [resolve('dist/cli.js'), 'edit'], {
             encoding: 'utf8',
             input: '',
             timeout: 15000,
         });
         expect(edit.status).toBe(1);
-        expect(edit.stderr.trim()).toBe('INVALID_REQUEST');
+        expect(edit.stderr).toMatch(/"code":"INVALID_REQUEST"/);
         expect(edit.stdout).toBe('');
         const editWithFlag = spawnSync(
             process.execPath,
@@ -126,7 +134,7 @@ it('rejects non-interactive init and edit and lists both in help', () => {
             { encoding: 'utf8', input: '', timeout: 15000 },
         );
         expect(editWithFlag.status).toBe(1);
-        expect(editWithFlag.stderr.trim()).toBe('INVALID_REQUEST');
+        expect(editWithFlag.stderr).toMatch(/"code":"INVALID_REQUEST"/);
     } finally {
         rmSync(folder, { recursive: true, force: true });
     }

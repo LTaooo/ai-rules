@@ -20,7 +20,6 @@ type Options = {
     parametersFile?: string;
     parameters?: string;
     maxRows?: number;
-    diagnose?: boolean;
 };
 
 /** 为人工、脚本与 agent 提供只读 SQL 查询的命令行入口。 */
@@ -39,10 +38,8 @@ export class DatabaseCli {
      */
     public async run(args: string[] = process.argv.slice(2)): Promise<number> {
         let service: QueryService | undefined;
-        let diagnose = false;
         try {
             const options = this.parse(args);
-            diagnose = options.diagnose ?? false;
             if (options.command === 'help') {
                 this.write(this.help());
                 return 0;
@@ -59,13 +56,11 @@ export class DatabaseCli {
             const result = await this.execute(options, service);
             await service.close();
             service = undefined;
-            this.write(JSON.stringify(result));
+            this.write(JSON.stringify({ ok: true, result }));
             return 0;
         } catch (error) {
             const safe = SafeError.from(error);
-            this.stderr.write(`${safe.code}\n`);
-            if (diagnose && safe.diagnostic)
-                this.stderr.write(`${JSON.stringify(safe.diagnostic)}\n`);
+            this.stderr.write(`${JSON.stringify({ ok: false, result: safe.toResponse() })}\n`);
             return 1;
         } finally {
             try {
@@ -97,10 +92,6 @@ export class DatabaseCli {
             if (!flag?.startsWith('--') || seen.has(flag))
                 throw new SafeError(ErrorCode.InvalidRequest);
             seen.add(flag);
-            if (flag === '--diagnose') {
-                options.diagnose = true;
-                continue;
-            }
             const value = args[++index];
             if (!value || value.startsWith('--')) throw new SafeError(ErrorCode.InvalidRequest);
             if (flag === '--database') options.database = value;
@@ -281,7 +272,8 @@ export class DatabaseCli {
             'SQL defaults to stdin; parameters must be a JSON array from a file or --parameters (not both).',
             '--table-like does a contains match on table names; % and _ are SQL wildcards, * is translated to %.',
             'Values passed via --parameters appear on the command line; prefer files for sensitive values.',
-            'Optional --diagnose adds only a safe MySQL stage and allowlisted error code to stderr.',
+            'list, show, describe and query return one JSON object with ok and result.',
+            'Success is written to stdout (exit 0); errors are written to stderr (exit 1).',
         ].join('\n');
     }
 }

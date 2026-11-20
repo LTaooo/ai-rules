@@ -1,6 +1,6 @@
 ---
 name: database-query-cli
-description: 使用 database-query_cli 列出已配置数据源、查看表结构并执行参数化只读 SQL。涉及 PostgreSQL、MySQL 或 SQLite 的数据库查询、表结构检查和业务数据统计时使用。不用于数据修改、建表或数据库管理。
+description: 查询或统计 PostgreSQL、MySQL、MariaDB 或 SQLite 中的业务数据，查看表结构或索引，列出已配置的数据源，或排查 database-query CLI 的 SQL 拒绝与查询失败时使用。通过 CLI 执行参数化只读查询；不用于写入数据、变更表结构或管理数据库。
 ---
 
 # database-query_cli
@@ -42,13 +42,13 @@ node "$cli" --help
 
 1. 执行 `list`，根据公开别名和描述确定数据源。不猜测数据库名；目标不明确时询问用户。
 2. 执行 `describe --database <别名>`；已知表名时用 `--table <表名>`，否则用 `--table-like '片段'`（包含匹配，`*`、`%`、`?` 均可作为通配符）。不要无过滤整库 describe：结果被截断时命令返回 `RESULT_TOO_LARGE`，应改用过滤而不是重试。PostgreSQL 可指定 schema；SQLite 不传 schema，MySQL 不跨配置数据库查询。
-3. 根据实际结构编写最小必要 SELECT，优先明确列名、筛选条件和较小行数；不默认导出整表或读取密码、令牌等敏感列。
+3. 根据实际结构编写最小必要 SELECT，优先明确列名、筛选条件和较小行数；不默认导出整表或读取密码、令牌等敏感列。优先使用目标数据库中常见、易读的写法；有等价的常见写法时，不选用少见的方言运算符或专用函数，也不为解决兼容性问题引入更生僻的写法。
 4. SQL 和参数文件保存在当前任务专用目录，使用 UTF-8 无 BOM。业务值使用占位符绑定，不拼接用户输入。PostgreSQL 使用 `$1` 等占位符，MySQL/SQLite 使用 `?`。SQL 内不写注释，词法检查会整体拒绝。
 5. 调用 `query --database <别名> --sql-file <SQL文件> --max-rows <正整数>`；参数用 `--parameters-file <JSON文件>` 或内联 `--parameters '[1]'`，两者不可同时使用。无参数时两者都省略；参数为字符串、有限数字、布尔值或 null 组成的 JSON 数组。内联参数会留在 shell 历史与进程列表中，敏感业务值仍用文件绑定。
 6. SQL 从 stdin 读取时指定 `--sql-file -`；SQL 与参数文件不同时共用 stdin。
-7. 检查退出码、`rowCount` 和 `truncated`。结果截断时说明不完整，不把部分结果当作完整统计，也不自动调高限制或无限重试。
+7. `list`、`show`、`describe` 和 `query` 的响应是一行 JSON，顶层固定为 `ok` 和 `result`。退出码为 0 时从 stdout 读取 `ok:true` 的响应；退出码为 1 时从 stderr 读取 `ok:false` 的响应。无法解析 JSON 时，报告响应不可读，不根据内容猜测数据库是否执行成功。
 
-成功结果在 stdout，查询结果为含 `columns` 和二维 `rows` 的 JSON；不要按列名转对象而丢失重复列。大整数和精确小数可能以字符串返回，不随意转为浮点数。回复只包含用户所需的最少数据和结论，不额外保存原始结果。
+成功时从 `result` 读取数据。查询结果包含 `columns` 和二维 `rows`，不要按列名转对象而丢失重复列。检查 `result.rowCount` 和 `result.truncated`；结果截断时说明不完整，不把部分结果当作完整统计，也不自动调高限制或无限重试。大整数和精确小数可能以字符串返回，不随意转为浮点数。回复只包含用户所需的最少数据和结论，不额外保存原始结果。
 
 ## MySQL 表结构与索引
 
@@ -68,10 +68,11 @@ SHOW TABLE STATUS [LIKE 'pattern']
 
 ## 失败与安全底线
 
-- 非零退出或 stderr 安全错误码表示失败；只报告错误码及必要上下文，不输出驱动原始异常。
+- `ok:false` 时，使用 `result.code` 和 `result` 中可用的原因、位置或诊断字段判断下一步。用自然语言说明已确认的原因和必要上下文，不输出原始异常。
 - `CONFIG_ERROR`：请用户检查数据源条目；`NOT_FOUND`：核对公开别名或可见表；`INVALID_REQUEST`：检查 CLI 帮助和参数格式。
 - `CREDENTIAL_ERROR`：数据源不可用或未配置；请用户重新运行 `init` 向导，不尝试读取凭据内容。
-- `SQL_REJECTED`、`READ_ONLY_REQUIRED`：停止，不绕过 SQL 校验、只读事务或账户保护。
+- `SQL_REJECTED`：只有 `result.reason` 为 `parse_failed`、能定位不兼容的写法，且有语义等价的常见写法时，才保留数据源、查询限额和参数绑定，通过同一 CLI 自动改写并重试一次，无需人工确认。成功后返回结果并简要说明改写。词法拒绝、策略拒绝、原因不明、无法等价改写或重试仍失败时，停止并报告。CLI 解析失败不代表数据库不支持该语法。
+- `READ_ONLY_REQUIRED`：停止并报告，不重试，不绕过只读事务或账户保护。
 - `TIMEOUT`、`RESULT_TOO_LARGE`：缩小查询范围或返回列；整库 describe 被截断时改用 `--table` 或 `--table-like` 过滤，不自动提高安全限额。`DATABASE_ERROR`：报告连接或执行失败，不读取凭证排查。
 - 不执行写入、DDL、多语句、事务管理、文件输出或危险函数（文件读取、休眠、加锁类）；不得改用 cli、原生数据库 CLI、驱动脚本或修改程序来绕过限制。
 - 单进程并发上限不限制多个 CLI 进程的总并发；不要批量并行启动查询制造数据库负载。

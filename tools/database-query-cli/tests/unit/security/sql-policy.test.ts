@@ -1,6 +1,61 @@
 import { Dialect } from '../../../src/domain/enums/Dialect.js';
 import { describe, expect, it } from 'vitest';
 import { SqlPolicy } from '../../../src/security/SqlPolicy.js';
+import { SafeError } from '../../../src/shared/errors/SafeError.js';
+
+function rejection(sql: string, dialect = Dialect.MySQL) {
+    try {
+        SqlPolicy.validateSql(sql, dialect);
+    } catch (error) {
+        if (error instanceof SafeError) return error.toResponse();
+        throw error;
+    }
+    throw new Error('Expected SQL validation to reject');
+}
+
+it.each([
+    [
+        'SELECT SUM(CAST(down_file_name AS BINARY) <=> CAST(platform_code AS BINARY)) FROM lazada_user',
+        '>',
+    ],
+    ['SELECT eq_subject FROM email_queue WHERE eq_subject REGEXP ?', '?'],
+])('locates unsupported MySQL syntax in the submitted SQL', (sql, token) => {
+    expect(rejection(`\r\n  ${sql};\r\n`)).toEqual({
+        code: 'SQL_REJECTED',
+        reason: 'parse_failed',
+        line: 2,
+        column: sql.indexOf(token) + 3,
+    });
+});
+
+it.each(Object.values(Dialect))('reports the original EOF location (%s)', (dialect) => {
+    expect(rejection('\r\n  SELECT 1 +', dialect)).toEqual({
+        code: 'SQL_REJECTED',
+        reason: 'parse_failed',
+        line: 2,
+        column: 13,
+    });
+});
+
+it.each(Object.values(Dialect))(
+    'omits the parser EOF location when a suffix was removed (%s)',
+    (dialect) => {
+        const error = rejection('SELECT 1 + ;', dialect);
+        expect(error).toMatchObject({ code: 'SQL_REJECTED', reason: 'parse_failed' });
+        expect(error).not.toHaveProperty('line');
+        expect(error).not.toHaveProperty('column');
+    },
+);
+
+it.each([
+    ['SELECT 1; SELECT 2', 'lexical_rejected'],
+    ['SELECT 1 /* disallowed comment */', 'lexical_rejected'],
+    ['DELETE FROM users', 'policy_denied'],
+    ['SHOW GRANTS', 'policy_denied'],
+    ['SELECT SLEEP(1)', 'policy_denied'],
+])('does not classify a safety rejection as a syntax error', (sql, reason) => {
+    expect(rejection(sql)).toMatchObject({ code: 'SQL_REJECTED', reason });
+});
 
 describe('SQL policy', () => {
     for (const dialect of Object.values(Dialect)) {

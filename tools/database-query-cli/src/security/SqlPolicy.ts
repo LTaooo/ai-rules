@@ -1,4 +1,3 @@
-import { ErrorCode } from '../domain/enums/ErrorCode.js';
 import sqlParser from 'node-sql-parser';
 import { SafeError } from '../shared/errors/SafeError.js';
 import { Dialect } from '../domain/enums/Dialect.js';
@@ -149,7 +148,7 @@ const allowedMysqlShow = new RegExp(
 export class SqlPolicy {
     /** 终止不可信 SQL 的验证，仅抛出不包含 SQL 的安全错误。 */
     private static reject(): never {
-        throw new SafeError(ErrorCode.SqlRejected);
+        throw SafeError.sql('policy_denied');
     }
     /** 要求 AST 节点为对象，拒绝 null、数组和其他非法节点。 */
     private static record(value: unknown): Record<string, unknown> {
@@ -186,14 +185,17 @@ export class SqlPolicy {
 
     /** 拒绝注释、反斜杠、异常引号、多语句和过深括号，消除方言解析歧义。 */
     private static checkLexical(sql: string): string {
-        if (Buffer.byteLength(sql) > 65536 || !sql.trim()) SqlPolicy.reject();
+        const reject = (): never => {
+            throw SafeError.sql('lexical_rejected');
+        };
+        if (Buffer.byteLength(sql) > 65536 || !sql.trim()) reject();
         let quote = '';
         let depth = 0;
         let ended = false;
         for (let index = 0; index < sql.length; index++) {
             const character = sql[index]!;
             // 反斜杠与注释在各方言中有不同的转义规则，直接拒绝以消除解析歧义。
-            if (character === '\\' || character === '\0') SqlPolicy.reject();
+            if (character === '\\' || character === '\0') reject();
             if (quote) {
                 if (character === quote) {
                     if (sql[index + 1] === quote) index++;
@@ -201,20 +203,20 @@ export class SqlPolicy {
                 }
                 continue;
             }
-            if (ended && !/\s/.test(character)) SqlPolicy.reject();
+            if (ended && !/\s/.test(character)) reject();
             if (character === "'" || character === '"' || character === '`') quote = character;
             else if (
                 character === '#' ||
                 (character === '-' && sql[index + 1] === '-') ||
                 (character === '/' && sql[index + 1] === '*')
             )
-                SqlPolicy.reject();
+                reject();
             else if (character === ';') ended = true;
-            else if (character === '(' && ++depth > 64) SqlPolicy.reject();
+            else if (character === '(' && ++depth > 64) reject();
             else if (character === ')') depth--;
-            else if (character === '$' && !/[0-9]/.test(sql[index + 1] ?? '')) SqlPolicy.reject();
+            else if (character === '$' && !/[0-9]/.test(sql[index + 1] ?? '')) reject();
         }
-        if (quote || depth !== 0) SqlPolicy.reject();
+        if (quote || depth !== 0) reject();
         return sql.trim().replace(/;$/, '').trim();
     }
 
@@ -271,6 +273,43 @@ export class SqlPolicy {
         for (const child of Object.values(node)) SqlPolicy.visit(child, dialect, depth + 1);
     }
 
+    private static parse(clean: string, sql: string, dialect: Dialect): unknown {
+        try {
+            return parser.astify(clean, {
+                database: { sqlite: 'SQLite', postgres: 'Postgresql', mysql: 'MySQL' }[dialect],
+            });
+        } catch (error) {
+            // 生成的解析器错误不是原生 SyntaxError；只识别其结构，不读取错误文本。
+            if (
+                !(error instanceof Error) ||
+                error.name !== 'SyntaxError' ||
+                !('expected' in error) ||
+                !Array.isArray(error.expected) ||
+                !('found' in error) ||
+                !('location' in error)
+            )
+                throw SafeError.sql('unknown');
+            const location = error.location as { start?: { offset?: unknown } } | null;
+            const offset = location?.start?.offset;
+            if (
+                typeof offset !== 'number' ||
+                !Number.isSafeInteger(offset) ||
+                offset < 0 ||
+                offset > clean.length
+            )
+                throw SafeError.sql('parse_failed');
+            const originalOffset = sql.length - sql.trimStart().length + offset;
+            // 规范化移除尾部内容时，解析器的 EOF 不对应原始输入的 EOF。
+            if (offset === clean.length && originalOffset !== sql.length)
+                throw SafeError.sql('parse_failed');
+            const lines = sql.slice(0, originalOffset).split(/\r\n|\r|\n/);
+            throw SafeError.sql('parse_failed', {
+                line: lines.length,
+                column: lines.at(-1)!.length + 1,
+            });
+        }
+    }
+
     /**
      * 以词法检查、受限 MySQL SHOW 语法及 SELECT AST 验证单条只读语句；
      * SELECT 的写入与注入面形状拒绝，其余语法由只读账户、只读事务和执行超时兜底。
@@ -284,9 +323,7 @@ export class SqlPolicy {
                 if (dialect !== Dialect.MySQL || !allowedMysqlShow.test(clean)) SqlPolicy.reject();
                 return clean;
             }
-            const parsed: unknown = parser.astify(clean, {
-                database: { sqlite: 'SQLite', postgres: 'Postgresql', mysql: 'MySQL' }[dialect],
-            });
+            const parsed = SqlPolicy.parse(clean, sql, dialect);
             const statement = Array.isArray(parsed)
                 ? parsed.length === 1
                     ? parsed[0]
@@ -295,8 +332,8 @@ export class SqlPolicy {
             if (SqlPolicy.record(statement).type !== 'select') SqlPolicy.reject();
             SqlPolicy.visit(statement, dialect, 0);
             return clean;
-        } catch {
-            return SqlPolicy.reject();
+        } catch (error) {
+            throw error instanceof SafeError ? error : SafeError.sql('unknown');
         }
     }
 }

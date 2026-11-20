@@ -27,8 +27,9 @@ SQL 默认从标准输入读取；参数化查询使用 `--sql-file`，若 SQL �
 
 - `list` 返回数据库别名、类型和公开描述；`show --database <别名>` 只返回业务标识（类型、描述、库名）与 TLS 模式，不返回主机、端口、用户名或密码——主机与用户名属于侦察信息，完整接线由用户通过 `cmdkey /list:database-query.<别名>` 查看。
 - `describe` 返回可见列信息，支持精确 `--table` 或模糊 `--table-like`（`%` 通配）；无过滤且结果被截断时返回 `RESULT_TOO_LARGE`，应改用过滤。`query` 返回 `columns`、`rows`、`rowCount`、`truncated`、`durationMs`。
-- CLI 成功结果为 stdout JSON；帮助为文本。常规失败在 stderr 输出安全错误码，退出码为 1，成功为 0。CLI 关闭请求日志。
-- 显式增加 `--diagnose` 时，MySQL 失败会额外在 stderr 输出固定执行阶段和白名单错误码；不输出驱动原始消息、连接地址、凭证、SQL 或参数。`CONNECT` 表示连接尚未建立，`UNKNOWN` 表示错误码不在公开白名单内，不能据此推断具体原因。
+- `list`、`show`、`describe` 和 `query` 返回一行 JSON，顶层固定为 `ok` 和 `result`。成功时在 stdout 输出 `{"ok":true,"result":...}`，退出码为 0；失败时在 stderr 输出 `{"ok":false,"result":...}`，退出码为 1，`result` 包含 `code` 和可用的安全诊断。`ok:true` 不表示结果完整，仍须检查 `result.truncated`（若存在）。帮助为文本；交互式向导的提示和成功记录保留原格式，主动取消退出码为 1，不输出错误 JSON。CLI 关闭请求日志。
+- `SQL_REJECTED` 的 `reason` 区分词法检查失败 `lexical_rejected`、CLI 解析失败 `parse_failed`、策略拒绝 `policy_denied`；原因不明时省略 `reason`。解析位置可靠时，附上原 SQL 中从 1 开始的 `line` 和 `column`；列按 UTF-16 代码单元计数。CLI 解析失败不表示数据库不支持该语法。
+- 可用的诊断放在 `diagnostic` 中：MySQL 提供执行阶段 `stage` 和白名单驱动错误码 `reason`（`UNKNOWN` 表示没有可公开的驱动错误码）；凭据错误可提供固定原因类别。`CONNECT` 表示连接尚未建立。不会输出原始异常、连接地址、凭证、SQL 或参数。
 - CLI 复用 `QueryService`、`SqlPolicy` 和数据库适配器，不通过 Skill 绕过只读保护。每次命令独立启动，并发限制不是跨 CLI 进程的全局限制。
 - 全部数据源配置（含密码）保存在 Windows 凭据管理器：每个数据源一条通用凭据，目标名为 `database-query.<别名>`，内容为整份 JSON 配置。没有任何配置文件；不接入云凭据管理，不使用 `.agentsignore`。
 - `init` 子命令运行交互式向导：询问数据源信息与密码（密码提示不回显），经 PowerShell `CredWriteW` 写入凭据管理器并读回验证。向导需要交互终端，由用户自行运行；命令不再接受任何路径参数。

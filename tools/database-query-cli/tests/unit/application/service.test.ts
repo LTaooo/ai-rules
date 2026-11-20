@@ -50,6 +50,20 @@ function setup(rows: unknown[][] = [[1]]) {
 }
 
 describe('query service', () => {
+    it('preserves parser rejection details without creating a database adapter', async () => {
+        const { registry } = makeRegistry([salesSource]);
+        const factory = vi.fn(() => makeAdapter());
+        const service = new QueryService(registry, undefined, factory, new Logger(() => undefined));
+        const error: unknown = await service
+            .query({ database: 'sales', sql: 'SELECT 1 +' })
+            .catch((err: unknown) => err);
+        expect(error).toBeInstanceOf(SafeError);
+        expect((error as SafeError).toResponse()).toMatchObject({
+            code: 'SQL_REJECTED',
+            reason: 'parse_failed',
+        });
+        expect(factory).not.toHaveBeenCalled();
+    });
     it('closes each lazy adapter once and rejects further queries', async () => {
         const { service, adapter } = setup();
         await service.query({ database: 'sales', sql: 'SELECT 1' });
